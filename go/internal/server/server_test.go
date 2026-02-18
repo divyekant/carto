@@ -204,3 +204,104 @@ func TestQueryEndpoint_MissingText(t *testing.T) {
 		t.Errorf("expected 'text is required' error, got '%v'", resp["error"])
 	}
 }
+
+func TestGetConfig(t *testing.T) {
+	cfg := config.Config{
+		MemoriesURL:   "http://localhost:8900",
+		MemoriesKey:   "god-is-an-astronaut-key",
+		AnthropicKey:  "sk-ant-api03-very-long-secret-key-value",
+		HaikuModel:    "claude-haiku-4-5-20251001",
+		OpusModel:     "claude-opus-4-6",
+		MaxConcurrent: 10,
+		LLMProvider:   "anthropic",
+		LLMApiKey:     "sk-llm-0123456789abcdef-secret",
+		LLMBaseURL:    "",
+	}
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(cfg, memoriesClient, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp configResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Non-secret fields should be returned as-is.
+	if resp.MemoriesURL != "http://localhost:8900" {
+		t.Errorf("unexpected memories_url: %s", resp.MemoriesURL)
+	}
+	if resp.HaikuModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("unexpected haiku_model: %s", resp.HaikuModel)
+	}
+
+	// Secret fields should be redacted: first 8 + **** + last 4.
+	if resp.AnthropicKey == cfg.AnthropicKey {
+		t.Error("anthropic_key should be redacted, but was returned in full")
+	}
+	if !strings.Contains(resp.AnthropicKey, "****") {
+		t.Errorf("anthropic_key should contain ****, got %q", resp.AnthropicKey)
+	}
+	if !strings.HasPrefix(resp.AnthropicKey, "sk-ant-a") {
+		t.Errorf("anthropic_key should start with first 8 chars, got %q", resp.AnthropicKey)
+	}
+
+	if resp.LLMApiKey == cfg.LLMApiKey {
+		t.Error("llm_api_key should be redacted")
+	}
+	if !strings.Contains(resp.LLMApiKey, "****") {
+		t.Errorf("llm_api_key should contain ****, got %q", resp.LLMApiKey)
+	}
+}
+
+func TestPatchConfig(t *testing.T) {
+	cfg := config.Config{
+		MemoriesURL:   "http://localhost:8900",
+		HaikuModel:    "claude-haiku-4-5-20251001",
+		MaxConcurrent: 10,
+	}
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(cfg, memoriesClient, "")
+
+	// PATCH to update haiku_model and max_concurrent.
+	patchBody := strings.NewReader(`{"haiku_model": "claude-haiku-4-5-20260101", "max_concurrent": 20}`)
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/config", patchBody)
+	patchReq.Header.Set("Content-Type", "application/json")
+	pw := httptest.NewRecorder()
+	srv.ServeHTTP(pw, patchReq)
+
+	if pw.Code != http.StatusOK {
+		t.Fatalf("PATCH expected 200, got %d: %s", pw.Code, pw.Body.String())
+	}
+
+	// GET to verify the mutation persisted.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	gw := httptest.NewRecorder()
+	srv.ServeHTTP(gw, getReq)
+
+	if gw.Code != http.StatusOK {
+		t.Fatalf("GET expected 200, got %d", gw.Code)
+	}
+
+	var resp configResponse
+	if err := json.NewDecoder(gw.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.HaikuModel != "claude-haiku-4-5-20260101" {
+		t.Errorf("expected patched haiku_model, got %q", resp.HaikuModel)
+	}
+	if resp.MaxConcurrent != 20 {
+		t.Errorf("expected patched max_concurrent=20, got %d", resp.MaxConcurrent)
+	}
+	// Unchanged field should remain the same.
+	if resp.MemoriesURL != "http://localhost:8900" {
+		t.Errorf("memories_url should be unchanged, got %q", resp.MemoriesURL)
+	}
+}

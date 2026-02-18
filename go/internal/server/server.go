@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/anthropic/indexer/internal/config"
 	"github.com/anthropic/indexer/internal/storage"
@@ -11,6 +12,7 @@ import (
 // Server holds the dependencies for the Carto web UI.
 type Server struct {
 	cfg            config.Config
+	cfgMu          sync.RWMutex
 	memoriesClient *storage.MemoriesClient
 	projectsDir    string
 	mux            *http.ServeMux

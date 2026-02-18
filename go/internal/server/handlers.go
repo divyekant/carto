@@ -162,3 +162,102 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": items})
 }
+
+// redactKey masks the middle of an API key, showing the first 8 and last 4
+// characters with **** in between. Keys shorter than 16 characters are fully
+// redacted to avoid leaking too much of short keys.
+func redactKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) < 16 {
+		return "****"
+	}
+	return key[:8] + "****" + key[len(key)-4:]
+}
+
+// configResponse is the JSON shape returned by GET /api/config.
+type configResponse struct {
+	MemoriesURL   string `json:"memories_url"`
+	MemoriesKey   string `json:"memories_key"`
+	AnthropicKey  string `json:"anthropic_key"`
+	HaikuModel    string `json:"haiku_model"`
+	OpusModel     string `json:"opus_model"`
+	MaxConcurrent int    `json:"max_concurrent"`
+	LLMProvider   string `json:"llm_provider"`
+	LLMApiKey     string `json:"llm_api_key"`
+	LLMBaseURL    string `json:"llm_base_url"`
+}
+
+// handleGetConfig returns the current server config with API keys redacted.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	writeJSON(w, http.StatusOK, configResponse{
+		MemoriesURL:   cfg.MemoriesURL,
+		MemoriesKey:   redactKey(cfg.MemoriesKey),
+		AnthropicKey:  redactKey(cfg.AnthropicKey),
+		HaikuModel:    cfg.HaikuModel,
+		OpusModel:     cfg.OpusModel,
+		MaxConcurrent: cfg.MaxConcurrent,
+		LLMProvider:   cfg.LLMProvider,
+		LLMApiKey:     redactKey(cfg.LLMApiKey),
+		LLMBaseURL:    cfg.LLMBaseURL,
+	})
+}
+
+// handlePatchConfig applies partial updates to the server config.
+func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	var patch map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	s.cfgMu.Lock()
+	for key, val := range patch {
+		switch key {
+		case "memories_url":
+			if v, ok := val.(string); ok {
+				s.cfg.MemoriesURL = v
+			}
+		case "memories_key":
+			if v, ok := val.(string); ok {
+				s.cfg.MemoriesKey = v
+			}
+		case "anthropic_key":
+			if v, ok := val.(string); ok {
+				s.cfg.AnthropicKey = v
+			}
+		case "haiku_model":
+			if v, ok := val.(string); ok {
+				s.cfg.HaikuModel = v
+			}
+		case "opus_model":
+			if v, ok := val.(string); ok {
+				s.cfg.OpusModel = v
+			}
+		case "max_concurrent":
+			if v, ok := val.(float64); ok {
+				s.cfg.MaxConcurrent = int(v)
+			}
+		case "llm_provider":
+			if v, ok := val.(string); ok {
+				s.cfg.LLMProvider = v
+			}
+		case "llm_api_key":
+			if v, ok := val.(string); ok {
+				s.cfg.LLMApiKey = v
+			}
+		case "llm_base_url":
+			if v, ok := val.(string); ok {
+				s.cfg.LLMBaseURL = v
+			}
+		}
+	}
+	s.cfgMu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
