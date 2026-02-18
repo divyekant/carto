@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Memory represents a document to store in the FAISS index.
+// Memory represents a document to store in the Memories index.
 type Memory struct {
 	Text        string         `json:"text"`
 	Source      string         `json:"source"`
@@ -19,7 +19,7 @@ type Memory struct {
 	Deduplicate bool           `json:"deduplicate"`
 }
 
-// SearchResult represents a single result returned from FAISS.
+// SearchResult represents a single result returned from Memories.
 type SearchResult struct {
 	ID     int            `json:"id"`
 	Text   string         `json:"text"`
@@ -36,16 +36,16 @@ type SearchOptions struct {
 	Source    string  `json:"source,omitempty"`
 }
 
-// FaissClient talks to the FAISS memory REST API.
-type FaissClient struct {
+// MemoriesClient talks to the Memories REST API.
+type MemoriesClient struct {
 	baseURL string
 	apiKey  string
 	http    http.Client
 }
 
-// NewFaissClient creates a client for the given base URL and API key.
-func NewFaissClient(baseURL, apiKey string) *FaissClient {
-	return &FaissClient{
+// NewMemoriesClient creates a client for the given base URL and API key.
+func NewMemoriesClient(baseURL, apiKey string) *MemoriesClient {
+	return &MemoriesClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		http: http.Client{
@@ -55,7 +55,7 @@ func NewFaissClient(baseURL, apiKey string) *FaissClient {
 }
 
 // request is the shared helper for all HTTP calls.
-func (c *FaissClient) request(method, path string, body any) (*http.Response, error) {
+func (c *MemoriesClient) request(method, path string, body any) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -79,8 +79,8 @@ func (c *FaissClient) request(method, path string, body any) (*http.Response, er
 	return resp, nil
 }
 
-// Health returns true when the FAISS server is reachable.
-func (c *FaissClient) Health() (bool, error) {
+// Health returns true when the Memories server is reachable.
+func (c *MemoriesClient) Health() (bool, error) {
 	resp, err := c.request(http.MethodGet, "/health", nil)
 	if err != nil {
 		return false, nil
@@ -90,7 +90,7 @@ func (c *FaissClient) Health() (bool, error) {
 }
 
 // AddMemory stores a single memory and returns its assigned ID.
-func (c *FaissClient) AddMemory(m Memory) (int, error) {
+func (c *MemoriesClient) AddMemory(m Memory) (int, error) {
 	resp, err := c.request(http.MethodPost, "/memory/add", m)
 	if err != nil {
 		return 0, err
@@ -99,7 +99,7 @@ func (c *FaissClient) AddMemory(m Memory) (int, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		text, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("FAISS API error %d: %s", resp.StatusCode, text)
+		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
 
 	var result struct {
@@ -114,7 +114,7 @@ func (c *FaissClient) AddMemory(m Memory) (int, error) {
 const batchSize = 500
 
 // AddBatch stores memories in chunks of 500.
-func (c *FaissClient) AddBatch(memories []Memory) error {
+func (c *MemoriesClient) AddBatch(memories []Memory) error {
 	for i := 0; i < len(memories); i += batchSize {
 		end := i + batchSize
 		if end > len(memories) {
@@ -134,14 +134,14 @@ func (c *FaissClient) AddBatch(memories []Memory) error {
 
 		if resp.StatusCode != http.StatusOK {
 			text, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("batch %d: FAISS API error %d: %s", i/batchSize, resp.StatusCode, text)
+			return fmt.Errorf("batch %d: memories API error %d: %s", i/batchSize, resp.StatusCode, text)
 		}
 	}
 	return nil
 }
 
-// Search queries the FAISS index with the given options.
-func (c *FaissClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+// Search queries the Memories index with the given options.
+func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
 	k := opts.K
 	if k == 0 {
 		k = 10
@@ -167,7 +167,7 @@ func (c *FaissClient) Search(query string, opts SearchOptions) ([]SearchResult, 
 
 	if resp.StatusCode != http.StatusOK {
 		text, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("FAISS API error %d: %s", resp.StatusCode, text)
+		return nil, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
 
 	var result struct {
@@ -180,7 +180,7 @@ func (c *FaissClient) Search(query string, opts SearchOptions) ([]SearchResult, 
 }
 
 // ListBySource fetches memories matching a source prefix.
-func (c *FaissClient) ListBySource(source string, limit int) ([]SearchResult, error) {
+func (c *MemoriesClient) ListBySource(source string, limit int) ([]SearchResult, error) {
 	if limit == 0 {
 		limit = 50
 	}
@@ -194,7 +194,7 @@ func (c *FaissClient) ListBySource(source string, limit int) ([]SearchResult, er
 
 	if resp.StatusCode != http.StatusOK {
 		text, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("FAISS API error %d: %s", resp.StatusCode, text)
+		return nil, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
 
 	var result struct {
@@ -207,7 +207,7 @@ func (c *FaissClient) ListBySource(source string, limit int) ([]SearchResult, er
 }
 
 // DeleteMemory removes a memory by ID. Tolerates 404 (already deleted).
-func (c *FaissClient) DeleteMemory(id int) error {
+func (c *MemoriesClient) DeleteMemory(id int) error {
 	path := fmt.Sprintf("/memory/%d", id)
 	resp, err := c.request(http.MethodDelete, path, nil)
 	if err != nil {
@@ -220,14 +220,14 @@ func (c *FaissClient) DeleteMemory(id int) error {
 	}
 	if resp.StatusCode != http.StatusOK {
 		text, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("FAISS API error %d: %s", resp.StatusCode, text)
+		return fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
 	return nil
 }
 
 // DeleteBySource lists memories matching the prefix and deletes each one.
 // Returns the number of memories deleted.
-func (c *FaissClient) DeleteBySource(prefix string) (int, error) {
+func (c *MemoriesClient) DeleteBySource(prefix string) (int, error) {
 	memories, err := c.ListBySource(prefix, 0)
 	if err != nil {
 		return 0, fmt.Errorf("list by source: %w", err)

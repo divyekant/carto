@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestFaissClient_Health(t *testing.T) {
+func TestMemoriesClient_Health(t *testing.T) {
 	t.Run("healthy server", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/health" {
@@ -19,7 +19,7 @@ func TestFaissClient_Health(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := NewFaissClient(srv.URL, "test-key")
+		client := NewMemoriesClient(srv.URL, "test-key")
 		ok, err := client.Health()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -35,7 +35,7 @@ func TestFaissClient_Health(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := NewFaissClient(srv.URL, "test-key")
+		client := NewMemoriesClient(srv.URL, "test-key")
 		ok, err := client.Health()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -46,7 +46,7 @@ func TestFaissClient_Health(t *testing.T) {
 	})
 
 	t.Run("unreachable server", func(t *testing.T) {
-		client := NewFaissClient("http://127.0.0.1:1", "test-key")
+		client := NewMemoriesClient("http://127.0.0.1:1", "test-key")
 		ok, err := client.Health()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -57,7 +57,7 @@ func TestFaissClient_Health(t *testing.T) {
 	})
 }
 
-func TestFaissClient_AddMemory(t *testing.T) {
+func TestMemoriesClient_AddMemory(t *testing.T) {
 	var receivedAPIKey string
 	var receivedBody map[string]any
 
@@ -77,7 +77,7 @@ func TestFaissClient_AddMemory(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewFaissClient(srv.URL, "secret-key-123")
+	client := NewMemoriesClient(srv.URL, "secret-key-123")
 	id, err := client.AddMemory(Memory{
 		Text:        "Go is great",
 		Source:      "test/lang",
@@ -107,7 +107,7 @@ func TestFaissClient_AddMemory(t *testing.T) {
 	}
 }
 
-func TestFaissClient_Search(t *testing.T) {
+func TestMemoriesClient_Search(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -136,7 +136,7 @@ func TestFaissClient_Search(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewFaissClient(srv.URL, "test-key")
+	client := NewMemoriesClient(srv.URL, "test-key")
 	results, err := client.Search("test query", SearchOptions{
 		K:      5,
 		Hybrid: true,
@@ -168,7 +168,7 @@ func TestFaissClient_Search(t *testing.T) {
 	}
 }
 
-func TestFaissClient_DeleteBySource(t *testing.T) {
+func TestMemoriesClient_DeleteBySource(t *testing.T) {
 	var deletedIDs []string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +199,7 @@ func TestFaissClient_DeleteBySource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewFaissClient(srv.URL, "test-key")
+	client := NewMemoriesClient(srv.URL, "test-key")
 	count, err := client.DeleteBySource("proj/old")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
