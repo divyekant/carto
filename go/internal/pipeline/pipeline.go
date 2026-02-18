@@ -205,8 +205,9 @@ func Run(cfg Config) (*Result, error) {
 			}
 			atomErrors = append(atomErrors, chunkErrs...)
 			atomsDone++
-			progress("atoms", atomsDone, len(work))
+			d := atomsDone
 			atomsMu.Unlock()
+			progress("atoms", d, len(work))
 		}(i, w)
 	}
 
@@ -269,8 +270,9 @@ func Run(cfg Config) (*Result, error) {
 				contextErrors = append(contextErrors, histErr)
 			}
 			contextDone++
-			progress("history", contextDone, len(work))
+			d := contextDone
 			contextMu.Unlock()
+			progress("history", d, len(work))
 		}(i, w)
 	}
 
