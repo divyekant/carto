@@ -106,8 +106,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		IsOAuth:       config.IsOAuthToken(cfg.AnthropicKey),
 	})
 
-	// Create FAISS client.
-	faissClient := storage.NewFaissClient(cfg.MemoriesURL, cfg.MemoriesKey)
+	// Create Memories client.
+	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
 	// Create signal registry and register git signals.
 	registry := signals.NewRegistry()
@@ -143,7 +143,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		ProjectName:    projectName,
 		RootPath:       absPath,
 		LLMClient:      llmClient,
-		FaissClient:    faissClient,
+		MemoriesClient: memoriesClient,
 		SignalRegistry: registry,
 		MaxWorkers:     cfg.MaxConcurrent,
 		ProgressFn:     progressFn,
@@ -204,11 +204,11 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	count, _ := cmd.Flags().GetInt("count")
 
 	cfg := config.Load()
-	faissClient := storage.NewFaissClient(cfg.MemoriesURL, cfg.MemoriesKey)
+	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
 	// If a project is provided, try tier-based retrieval.
 	if project != "" {
-		store := storage.NewStore(faissClient, project)
+		store := storage.NewStore(memoriesClient, project)
 
 		storageTier := storage.Tier(tier)
 		results, err := store.RetrieveByTier(query, storageTier)
@@ -234,7 +234,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	// Free-form search across all projects.
-	results, err := faissClient.Search(query, storage.SearchOptions{
+	results, err := memoriesClient.Search(query, storage.SearchOptions{
 		K:      count,
 		Hybrid: true,
 	})

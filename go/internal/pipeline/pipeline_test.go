@@ -59,20 +59,20 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 	return json.RawMessage(`{}`), nil
 }
 
-// ── Mock FAISS API ─────────────────────────────────────────────────────
+// ── Mock Memories API ──────────────────────────────────────────────────
 
 type storedMemory struct {
 	text   string
 	source string
 }
 
-type mockFaiss struct {
+type mockMemories struct {
 	mu       sync.Mutex
 	memories []storedMemory
 	nextID   int
 }
 
-func (m *mockFaiss) AddMemory(mem storage.Memory) (int, error) {
+func (m *mockMemories) AddMemory(mem storage.Memory) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++
@@ -80,7 +80,7 @@ func (m *mockFaiss) AddMemory(mem storage.Memory) (int, error) {
 	return m.nextID, nil
 }
 
-func (m *mockFaiss) AddBatch(memories []storage.Memory) error {
+func (m *mockMemories) AddBatch(memories []storage.Memory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, mem := range memories {
@@ -90,19 +90,19 @@ func (m *mockFaiss) AddBatch(memories []storage.Memory) error {
 	return nil
 }
 
-func (m *mockFaiss) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+func (m *mockMemories) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
 	return nil, nil
 }
 
-func (m *mockFaiss) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
+func (m *mockMemories) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
 	return nil, nil
 }
 
-func (m *mockFaiss) DeleteBySource(prefix string) (int, error) {
+func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	return 0, nil
 }
 
-func (m *mockFaiss) getMemories() []storedMemory {
+func (m *mockMemories) getMemories() []storedMemory {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := make([]storedMemory, len(m.memories))
@@ -175,7 +175,7 @@ func Add(a, b int) int {
 func TestRun_FullPipeline(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 	registry := signals.NewRegistry()
 	registry.Register(&mockSignalSource{})
 
@@ -187,7 +187,7 @@ func TestRun_FullPipeline(t *testing.T) {
 		ProjectName:    "test-project",
 		RootPath:       dir,
 		LLMClient:      llmClient,
-		FaissClient:    faiss,
+		MemoriesClient: mem,
 		SignalRegistry: registry,
 		MaxWorkers:     2,
 		ProgressFn: func(phase string, done, total int) {
@@ -269,10 +269,10 @@ func TestRun_FullPipeline(t *testing.T) {
 		t.Error("LLM was never called with TierOpus (analysis)")
 	}
 
-	// Verify FAISS stored data.
-	memories := faiss.getMemories()
+	// Verify Memories stored data.
+	memories := mem.getMemories()
 	if len(memories) == 0 {
-		t.Error("no memories stored in FAISS")
+		t.Error("no memories stored")
 	}
 
 	// Check that we stored the expected layer types.
@@ -288,7 +288,7 @@ func TestRun_FullPipeline(t *testing.T) {
 
 	for _, layer := range []string{"atoms", "history", "signals", "wiring", "zones", "blueprint", "patterns"} {
 		if !layersSeen[layer] {
-			t.Errorf("layer %q was not stored in FAISS", layer)
+			t.Errorf("layer %q was not stored in Memories", layer)
 		}
 	}
 }
@@ -296,13 +296,13 @@ func TestRun_FullPipeline(t *testing.T) {
 func TestRun_ModuleFilter(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 
 	result, err := Run(Config{
 		ProjectName:  "test-project",
 		RootPath:     dir,
 		LLMClient:    llmClient,
-		FaissClient:  faiss,
+		MemoriesClient: mem,
 		MaxWorkers:   1,
 		ModuleFilter: "nonexistent-module",
 	})
@@ -332,14 +332,14 @@ func TestRun_ModuleFilter(t *testing.T) {
 func TestRun_IncrementalManifest(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 
 	// First run: full index.
 	result1, err := Run(Config{
 		ProjectName: "test-project",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  2,
 		Incremental: true,
 	})
@@ -367,7 +367,7 @@ func TestRun_IncrementalManifest(t *testing.T) {
 		ProjectName: "test-project",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  2,
 		Incremental: true,
 	})
@@ -393,7 +393,7 @@ func TestRun_IncrementalManifest(t *testing.T) {
 func TestRun_ProgressPhases(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 
 	var phaseOrder []string
 	var phaseMu sync.Mutex
@@ -402,7 +402,7 @@ func TestRun_ProgressPhases(t *testing.T) {
 		ProjectName: "test-project",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  1,
 		ProgressFn: func(phase string, done, total int) {
 			phaseMu.Lock()
@@ -441,13 +441,13 @@ func TestRun_ErrorCollection(t *testing.T) {
 	// Add a file that can't be read (simulate by creating a directory with a .go name).
 	// Actually, let's just verify that the pipeline runs and collects errors gracefully.
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 
 	result, err := Run(Config{
 		ProjectName: "test-project",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  1,
 	})
 	if err != nil {
@@ -463,14 +463,14 @@ func TestRun_ErrorCollection(t *testing.T) {
 func TestRun_NilProgressFn(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	faiss := &mockFaiss{}
+	mem := &mockMemories{}
 
 	// Run without a progress callback -- should not panic.
 	result, err := Run(Config{
 		ProjectName: "test-project",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  1,
 		ProgressFn:  nil,
 	})
@@ -501,7 +501,7 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 				ProjectName: "test-project",
 				RootPath:    dir,
 				LLMClient:   &mockLLM{},
-				FaissClient: &mockFaiss{},
+				MemoriesClient: &mockMemories{},
 				MaxWorkers:  2,
 				ProgressFn: func(phase string, done, total int) {
 					opCount.Add(1)
