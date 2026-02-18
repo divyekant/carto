@@ -47,7 +47,7 @@ go build -o carto ./cmd/carto
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
 # Memories server defaults to http://localhost:8900 -- override if needed:
-# export MEMORIES_URL="http://your-faiss-server:8900"
+# export MEMORIES_URL="http://your-memories-server:8900"
 ```
 
 ### Run
