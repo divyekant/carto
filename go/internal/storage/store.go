@@ -46,6 +46,7 @@ const (
 // MemoriesAPI is the interface Store uses from MemoriesClient.
 // This enables testing with mocks instead of requiring a real HTTP server.
 type MemoriesAPI interface {
+	Health() (bool, error)
 	AddMemory(m Memory) (int, error)
 	AddBatch(memories []Memory) error
 	Search(query string, opts SearchOptions) ([]SearchResult, error)

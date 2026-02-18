@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -25,6 +27,7 @@ type Manifest struct {
 	IndexedAt time.Time            `json:"indexed_at"`
 	Files     map[string]FileEntry `json:"files"` // keyed by relative path
 	path      string               // on-disk path to manifest.json (not serialized)
+	mu        sync.Mutex           // protects concurrent in-memory access (not serialized)
 }
 
 // ChangeSet describes what changed since the last index.
@@ -45,17 +48,28 @@ func NewManifest(projectRoot, projectName string) *Manifest {
 	}
 }
 
-// Load reads a manifest from {projectRoot}/.carto/manifest.json.
+// Load reads a manifest from {projectRoot}/.carto/manifest.json with a shared
+// file lock so concurrent readers don't conflict with writers.
 // If the file does not exist, it returns a new empty manifest (not an error).
 func Load(projectRoot string) (*Manifest, error) {
 	p := filepath.Join(projectRoot, ".carto", "manifest.json")
 
-	data, err := os.ReadFile(p)
+	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			m := NewManifest(projectRoot, "")
-			return m, nil
+			return NewManifest(projectRoot, ""), nil
 		}
+		return nil, fmt.Errorf("open manifest: %w", err)
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return nil, fmt.Errorf("lock manifest for reading: %w", err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+
+	data, err := io.ReadAll(f)
+	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
 
@@ -72,7 +86,8 @@ func Load(projectRoot string) (*Manifest, error) {
 	return &m, nil
 }
 
-// Save writes the manifest to disk as JSON.
+// Save writes the manifest to disk as JSON with an exclusive file lock
+// to prevent concurrent writes from corrupting the file.
 // It creates the .carto/ directory if it does not already exist.
 func (m *Manifest) Save() error {
 	dir := filepath.Dir(m.path)
@@ -80,14 +95,26 @@ func (m *Manifest) Save() error {
 		return fmt.Errorf("create manifest dir: %w", err)
 	}
 
+	m.mu.Lock()
 	m.IndexedAt = time.Now()
-
 	data, err := json.MarshalIndent(m, "", "  ")
+	m.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 
-	if err := os.WriteFile(m.path, data, 0o644); err != nil {
+	f, err := os.OpenFile(m.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("open manifest for writing: %w", err)
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock manifest: %w", err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+
+	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil
@@ -112,6 +139,8 @@ func (m *Manifest) ComputeHash(filePath string) (string, error) {
 // DetectChanges compares a list of current file paths (relative to projectRoot)
 // against the manifest to determine what has been added, modified, or removed.
 func (m *Manifest) DetectChanges(currentFiles []string, projectRoot string) (*ChangeSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	cs := &ChangeSet{}
 
 	// Build a set of current files for fast lookup.
@@ -151,6 +180,8 @@ func (m *Manifest) DetectChanges(currentFiles []string, projectRoot string) (*Ch
 
 // UpdateFile adds or updates a file entry in the manifest with the current timestamp.
 func (m *Manifest) UpdateFile(relPath, hash string, size int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Files[relPath] = FileEntry{
 		Hash:      hash,
 		Size:      size,
@@ -160,10 +191,14 @@ func (m *Manifest) UpdateFile(relPath, hash string, size int64) {
 
 // RemoveFile deletes a file entry from the manifest.
 func (m *Manifest) RemoveFile(relPath string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Files, relPath)
 }
 
 // IsEmpty returns true if no files are tracked in the manifest.
 func (m *Manifest) IsEmpty() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return len(m.Files) == 0
 }
