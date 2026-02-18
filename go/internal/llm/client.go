@@ -224,7 +224,11 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 		}
 
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Anthropic-Beta", OAuthBeta+","+ThinkingBeta)
+		beta := OAuthBeta
+		if tier == TierOpus {
+			beta += "," + ThinkingBeta
+		}
+		req.Header.Set("Anthropic-Beta", beta)
 		req.Header.Set("User-Agent", UserAgent)
 		// Remove x-api-key if present (belt-and-suspenders).
 		req.Header.Del("X-Api-Key")

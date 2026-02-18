@@ -188,6 +188,40 @@ func TestClient_OAuthHeaders(t *testing.T) {
 	}
 }
 
+func TestClient_OAuthHeaders_HaikuExcludesThinking(t *testing.T) {
+	var gotHeaders http.Header
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+
+		resp := map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "ok"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Options{
+		APIKey:  "oauth-token-456",
+		BaseURL: srv.URL,
+		IsOAuth: true,
+	})
+
+	_, err := c.Complete("hi", TierHaiku, nil)
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+
+	// Haiku must have OAuth beta but NOT thinking beta.
+	got := gotHeaders.Get("Anthropic-Beta")
+	if got != OAuthBeta {
+		t.Errorf("got Anthropic-Beta %q, want %q (OAuth only, no thinking)", got, OAuthBeta)
+	}
+}
+
 func TestClient_CompleteJSON(t *testing.T) {
 	cases := []struct {
 		name     string
