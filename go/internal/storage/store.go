@@ -1,6 +1,9 @@
 package storage
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+)
 
 // Layer constants for tagging in Memories.
 const (
@@ -74,7 +77,10 @@ func (s *Store) sourceTag(module, layer string) string {
 // StoreLayer stores content in Memories with the appropriate source tag.
 // Content exceeding 49000 chars is truncated at the last newline boundary.
 func (s *Store) StoreLayer(module, layer, content string) error {
-	content = truncate(content, maxContentLen)
+	if len(content) > maxContentLen {
+		log.Printf("storage: warning: content truncated from %d to %d chars for source %s", len(content), maxContentLen, s.sourceTag(module, layer))
+		content = truncate(content, maxContentLen)
+	}
 	_, err := s.memories.AddMemory(Memory{
 		Text:   content,
 		Source: s.sourceTag(module, layer),

@@ -1,6 +1,9 @@
 package signals
 
-import "time"
+import (
+	"log"
+	"time"
+)
 
 // Signal represents a piece of external context (ticket, PR, doc).
 type Signal struct {
@@ -51,7 +54,7 @@ func (r *Registry) FetchAll(module Module) ([]Signal, error) {
 	for _, s := range r.sources {
 		signals, err := s.FetchSignals(module)
 		if err != nil {
-			// Log warning but don't fail — plugins are optional.
+			log.Printf("signals: warning: source %s failed for module %s: %v", s.Name(), module.Name, err)
 			continue
 		}
 		all = append(all, signals...)

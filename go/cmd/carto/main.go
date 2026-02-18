@@ -16,6 +16,7 @@ import (
 	"github.com/anthropic/indexer/internal/patterns"
 	"github.com/anthropic/indexer/internal/pipeline"
 	"github.com/anthropic/indexer/internal/scanner"
+	"github.com/anthropic/indexer/internal/server"
 	"github.com/anthropic/indexer/internal/signals"
 	"github.com/anthropic/indexer/internal/storage"
 )
@@ -47,6 +48,7 @@ func main() {
 	root.AddCommand(modulesCmd())
 	root.AddCommand(patternsCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(serveCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -466,6 +468,31 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, formatBytes(totalSize))
 
 	return nil
+}
+
+// --------------------------------------------------------------------------
+// serve
+// --------------------------------------------------------------------------
+
+func serveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the Carto web UI",
+		RunE:  runServe,
+	}
+	cmd.Flags().String("port", "8950", "Port to listen on")
+	return cmd
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+	port, _ := cmd.Flags().GetString("port")
+
+	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
+
+	srv := server.New(cfg, memoriesClient)
+	fmt.Printf("%s%sCarto server%s starting on http://localhost:%s\n", bold, cyan, reset, port)
+	return srv.Start(":" + port)
 }
 
 // --------------------------------------------------------------------------

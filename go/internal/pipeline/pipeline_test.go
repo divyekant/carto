@@ -298,37 +298,19 @@ func TestRun_FullPipeline(t *testing.T) {
 
 func TestRun_ModuleFilter(t *testing.T) {
 	dir := createTempProject(t)
-	llmClient := &mockLLM{}
-	mem := &mockMemories{healthy: true}
-
-	result, err := Run(Config{
-		ProjectName:  "test-project",
-		RootPath:     dir,
-		LLMClient:    llmClient,
-		MemoriesClient: mem,
-		MaxWorkers:   1,
-		ModuleFilter: "nonexistent-module",
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: &mockMemories{healthy: true},
+		MaxWorkers:     1,
+		ModuleFilter:   "nonexistent-module",
 	})
-	if err != nil {
-		t.Fatalf("Run returned fatal error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for nonexistent module filter")
 	}
-
-	// No modules should match.
-	if result.Modules != 0 {
-		t.Errorf("Modules: got %d, want 0 (filter should exclude all)", result.Modules)
-	}
-
-	// No files should be indexed.
-	if result.FilesIndexed != 0 {
-		t.Errorf("FilesIndexed: got %d, want 0", result.FilesIndexed)
-	}
-
-	// LLM should not be called at all.
-	llmClient.mu.Lock()
-	calls := llmClient.calls
-	llmClient.mu.Unlock()
-	if calls != 0 {
-		t.Errorf("LLM calls: got %d, want 0 (no modules to process)", calls)
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
 	}
 }
 

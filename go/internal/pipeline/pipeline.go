@@ -91,6 +91,13 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	result.Modules = len(modules)
+	if cfg.ModuleFilter != "" && len(modules) == 0 {
+		available := make([]string, len(scanResult.Modules))
+		for i, m := range scanResult.Modules {
+			available[i] = m.Name
+		}
+		return nil, fmt.Errorf("pipeline: module %q not found. available: %v", cfg.ModuleFilter, available)
+	}
 	if len(modules) == 0 {
 		return result, nil
 	}
@@ -198,8 +205,9 @@ func Run(cfg Config) (*Result, error) {
 			}
 			atomErrors = append(atomErrors, chunkErrs...)
 			atomsDone++
-			progress("atoms", atomsDone, len(work))
+			d := atomsDone
 			atomsMu.Unlock()
+			progress("atoms", d, len(work))
 		}(i, w)
 	}
 
@@ -262,8 +270,9 @@ func Run(cfg Config) (*Result, error) {
 				contextErrors = append(contextErrors, histErr)
 			}
 			contextDone++
-			progress("history", contextDone, len(work))
+			d := contextDone
 			contextMu.Unlock()
+			progress("history", d, len(work))
 		}(i, w)
 	}
 
@@ -375,6 +384,7 @@ func Run(cfg Config) (*Result, error) {
 				hash, hashErr := mf.ComputeHash(absPath)
 				if hashErr != nil {
 					log.Printf("pipeline: warning: hash failed for %s: %v", relPath, hashErr)
+					result.Errors = append(result.Errors, fmt.Errorf("hash failed for %s: %w", relPath, hashErr))
 					continue
 				}
 				info, statErr := os.Stat(absPath)

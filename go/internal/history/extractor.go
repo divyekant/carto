@@ -2,6 +2,7 @@ package history
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -87,7 +88,13 @@ func ExtractFileHistory(repoRoot string, relPath string, opts *ExtractOptions) (
 
 	out, err := cmd.Output()
 	if err != nil {
-		// git not installed, not a repo, or file has no history — return empty.
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code := exitErr.ExitCode()
+			if code == 128 || code == 127 {
+				return &FileHistory{FilePath: relPath}, nil
+			}
+		}
+		log.Printf("history: warning: git log failed for %s: %v", relPath, err)
 		return &FileHistory{FilePath: relPath}, nil
 	}
 
