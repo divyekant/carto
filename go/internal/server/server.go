@@ -12,14 +12,16 @@ import (
 type Server struct {
 	cfg            config.Config
 	memoriesClient *storage.MemoriesClient
+	projectsDir    string
 	mux            *http.ServeMux
 }
 
 // New creates a new Server with the given config.
-func New(cfg config.Config, memoriesClient *storage.MemoriesClient) *Server {
+func New(cfg config.Config, memoriesClient *storage.MemoriesClient, projectsDir string) *Server {
 	s := &Server{
 		cfg:            cfg,
 		memoriesClient: memoriesClient,
+		projectsDir:    projectsDir,
 		mux:            http.NewServeMux(),
 	}
 	s.routes()
