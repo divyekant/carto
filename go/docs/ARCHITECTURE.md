@@ -4,7 +4,7 @@
 
 Carto is an intent-aware codebase intelligence tool. It scans a codebase
 end-to-end, extracts semantic understanding using a two-tier LLM strategy
-(Haiku for high-volume atom analysis, Opus for deep architectural analysis),
+(fast-tier for high-volume atom analysis, deep-tier for architectural analysis),
 and stores layered context in [Memories](https://github.com/divyekant/memories) for tiered retrieval. The output is a
 multi-layer knowledge graph that captures everything from individual function
 summaries to system-wide architectural blueprints.
@@ -21,8 +21,8 @@ vector storage and retrieval.
   files (go.mod, package.json, Cargo.toml, pom.xml, etc.)
 - **AST-based code chunking** -- Tree-sitter splits source files into logical
   units (functions, classes, methods, types) rather than arbitrary line ranges
-- **Two-tier LLM analysis** -- Haiku summarizes individual code chunks cheaply;
-  Opus performs expensive cross-module architectural analysis
+- **Two-tier LLM analysis** -- fast-tier summarizes individual code chunks cheaply;
+  deep-tier performs expensive cross-module architectural analysis
 - **Incremental indexing** -- SHA-256 manifest tracking ensures only changed
   files are re-indexed on subsequent runs
 - **Tiered retrieval** -- mini (~5KB), standard (~50KB), and full (~500KB)
@@ -114,7 +114,7 @@ For each module's files (filtered for incremental changes if applicable):
 
 2. **Atom analysis**: `atoms.AnalyzeBatch()` sends each chunk to the fast-tier LLM in
    parallel (controlled by a buffered channel semaphore with `MaxWorkers`
-   slots). Each Haiku call produces an `Atom` containing:
+   slots). Each fast-tier call produces an `Atom` containing:
    - `name` / `kind` -- carried from the chunk
    - `summary` -- 1-3 sentence description of purpose
    - `clarified_code` -- the code with cryptic variables renamed and inline
@@ -165,8 +165,8 @@ The deep analyzer uses the deep-tier LLM for two stages:
 1. **Per-module analysis**: `AnalyzeModules()` sends each module's atoms,
    history, and signals to the deep-tier LLM in parallel (same semaphore pattern). The
    prompt includes formatted atom summaries with imports/exports, file
-   history with churn scores and authorship, and external signals. Opus
-   returns a `ModuleAnalysis` containing:
+   history with churn scores and authorship, and external signals. The
+   deep-tier LLM returns a `ModuleAnalysis` containing:
    - `wiring` -- array of `Dependency{From, To, Reason}` describing
      cross-component connections
    - `zones` -- array of `Zone{Name, Intent, Files}` describing business
@@ -175,7 +175,7 @@ The deep analyzer uses the deep-tier LLM for two stages:
 
 2. **System synthesis**: `SynthesizeSystem()` takes all successful module
    analyses and sends them to the deep-tier LLM in a single call. The prompt includes
-   each module's intent, zones, and wiring. Opus returns a
+   each module's intent, zones, and wiring. The deep-tier LLM returns a
    `SystemSynthesis` containing:
    - `blueprint` -- narrative description of the overall system architecture
    - `patterns` -- array of coding conventions and architectural patterns
@@ -278,7 +278,7 @@ specific purpose in the context hierarchy:
 - **Content**: Business domain groupings with purpose statements
 - **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via deep-tier LLM (same call
   as wiring)
-- **LLM cost**: Included in the per-module Opus call
+- **LLM cost**: Included in the per-module deep-tier call
 - **Schema**: `analyzer.Zone` -- `Name` (domain name), `Intent` (purpose
   statement), `Files` (file paths belonging to this domain)
 - **Memories tag**: `carto/{project}/{module}/layer:zones`
@@ -628,7 +628,7 @@ This enables:
     | chunker.ChunkFile  |                            |
     |        |           |                            |
     |        v           |                            |
-    | atoms.AnalyzeBatch |---> Haiku LLM (per chunk)  |
+    | atoms.AnalyzeBatch |---> Fast LLM (per chunk)   |
     +----+----------+----+                            |
          |          |                                 |
          v          v                                 |
@@ -645,10 +645,10 @@ This enables:
     | Phase 4: Deep      |                            |
     |   Analysis         |                            |
     |                    |                            |
-    | AnalyzeModules     |---> Opus LLM (per module)  |
+    | AnalyzeModules     |---> Deep LLM (per module)  |
     |        |           |                            |
     |        v           |                            |
-    | SynthesizeSystem   |---> Opus LLM (one call)    |
+    | SynthesizeSystem   |---> Deep LLM (one call)    |
     +----+----------+----+                            |
          |          |                                 |
          v          v                                 v
@@ -689,8 +689,8 @@ cmd/carto/main.go
   |     |
   |     +-- internal/scanner
   |     +-- internal/chunker  (Tree-sitter AST chunking)
-  |     +-- internal/atoms    (Haiku-based atom analysis)
-  |     +-- internal/analyzer (Opus-based deep analysis)
+  |     +-- internal/atoms    (fast-tier atom analysis)
+  |     +-- internal/analyzer (deep-tier analysis)
   |     +-- internal/history  (git log extraction)
   |     +-- internal/signals
   |     +-- internal/storage
