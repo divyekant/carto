@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/anthropic/indexer/internal/config"
 	"github.com/anthropic/indexer/internal/llm"
 	"github.com/anthropic/indexer/internal/manifest"
+	"github.com/anthropic/indexer/internal/patterns"
 	"github.com/anthropic/indexer/internal/pipeline"
 	"github.com/anthropic/indexer/internal/scanner"
 	"github.com/anthropic/indexer/internal/signals"
@@ -332,17 +334,80 @@ func runPatterns(cmd *cobra.Command, args []string) error {
 
 	format, _ := cmd.Flags().GetString("format")
 
+	cfg := config.Load()
+	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
+
+	// Scan to discover modules.
 	result, err := scanner.Scan(absPath)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	fmt.Printf("%s%sPatterns generation for %s%s\n\n", bold, cyan, absPath, reset)
-	fmt.Printf("  Detected %d module(s), %d file(s)\n", len(result.Modules), len(result.Files))
-	fmt.Printf("  Output format: %s\n\n", format)
-	fmt.Printf("  %s%sNote:%s Patterns generation is not yet implemented.\n", bold, yellow, reset)
-	fmt.Printf("  This will generate CLAUDE.md and/or .cursorrules files\n")
-	fmt.Printf("  based on deep analysis of the codebase.\n")
+	projectName := filepath.Base(absPath)
+
+	// Try to load existing analysis from Memories.
+	store := storage.NewStore(memoriesClient, projectName)
+
+	// Build module summaries from scan.
+	var moduleSummaries []patterns.ModuleSummary
+	for _, mod := range result.Modules {
+		moduleSummaries = append(moduleSummaries, patterns.ModuleSummary{
+			Name:   mod.Name,
+			Type:   mod.Type,
+			Intent: "",
+		})
+	}
+
+	// Attempt to retrieve stored blueprint and patterns.
+	var blueprint string
+	var pats []string
+	var zones []patterns.Zone
+
+	if blueprintResults, err := store.RetrieveLayer("_system", "blueprint"); err == nil && len(blueprintResults) > 0 {
+		blueprint = blueprintResults[0].Text
+	}
+
+	if patResults, err := store.RetrieveLayer("_system", "patterns"); err == nil && len(patResults) > 0 {
+		var parsed []string
+		if jsonErr := json.Unmarshal([]byte(patResults[0].Text), &parsed); jsonErr == nil {
+			pats = parsed
+		}
+	}
+
+	// Retrieve zones from each module.
+	for _, mod := range result.Modules {
+		if zoneResults, err := store.RetrieveLayer(mod.Name, "zones"); err == nil && len(zoneResults) > 0 {
+			var modZones []patterns.Zone
+			if jsonErr := json.Unmarshal([]byte(zoneResults[0].Text), &modZones); jsonErr == nil {
+				zones = append(zones, modZones...)
+			}
+		}
+	}
+
+	input := patterns.Input{
+		ProjectName: projectName,
+		Blueprint:   blueprint,
+		Patterns:    pats,
+		Zones:       zones,
+		Modules:     moduleSummaries,
+	}
+
+	fmt.Printf("%s%sGenerating patterns for %s%s\n", bold, cyan, absPath, reset)
+	fmt.Printf("  modules: %d, format: %s\n\n", len(result.Modules), format)
+
+	if err := patterns.WriteFiles(absPath, input, format); err != nil {
+		return fmt.Errorf("write patterns: %w", err)
+	}
+
+	switch format {
+	case "claude":
+		fmt.Printf("  %s✓%s CLAUDE.md\n", green, reset)
+	case "cursor":
+		fmt.Printf("  %s✓%s .cursorrules\n", green, reset)
+	default:
+		fmt.Printf("  %s✓%s CLAUDE.md\n", green, reset)
+		fmt.Printf("  %s✓%s .cursorrules\n", green, reset)
+	}
 
 	return nil
 }
