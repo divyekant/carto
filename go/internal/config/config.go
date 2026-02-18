@@ -13,6 +13,9 @@ type Config struct {
 	HaikuModel    string
 	OpusModel     string
 	MaxConcurrent int
+	LLMProvider   string
+	LLMApiKey     string
+	LLMBaseURL    string
 }
 
 func Load() Config {
@@ -23,6 +26,9 @@ func Load() Config {
 		HaikuModel:    envOr("CARTO_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
 		OpusModel:     envOr("CARTO_OPUS_MODEL", "claude-opus-4-6"),
 		MaxConcurrent: envOrInt("CARTO_MAX_CONCURRENT", 10),
+		LLMProvider:   envOr("LLM_PROVIDER", "anthropic"),
+		LLMApiKey:     os.Getenv("LLM_API_KEY"),
+		LLMBaseURL:    os.Getenv("LLM_BASE_URL"),
 	}
 }
 

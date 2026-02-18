@@ -79,10 +79,15 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	cfg := config.Load()
 
-	if cfg.AnthropicKey == "" {
-		fmt.Fprintf(os.Stderr, "%serror:%s ANTHROPIC_API_KEY environment variable is not set.\n", red, reset)
-		fmt.Fprintf(os.Stderr, "  Set it with: export ANTHROPIC_API_KEY=sk-ant-...\n")
-		return fmt.Errorf("ANTHROPIC_API_KEY not set")
+	// Determine API key — LLM_API_KEY takes priority, falls back to ANTHROPIC_API_KEY.
+	apiKey := cfg.LLMApiKey
+	if apiKey == "" {
+		apiKey = cfg.AnthropicKey
+	}
+
+	if apiKey == "" && cfg.LLMProvider != "ollama" {
+		fmt.Fprintf(os.Stderr, "%serror:%s No API key set. Set LLM_API_KEY or ANTHROPIC_API_KEY.\n", red, reset)
+		return fmt.Errorf("API key not set")
 	}
 
 	full, _ := cmd.Flags().GetBool("full")
@@ -101,11 +106,12 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	// Create LLM client.
 	llmClient := llm.NewClient(llm.Options{
-		APIKey:        cfg.AnthropicKey,
+		APIKey:        apiKey,
 		HaikuModel:    cfg.HaikuModel,
 		OpusModel:     cfg.OpusModel,
 		MaxConcurrent: cfg.MaxConcurrent,
-		IsOAuth:       config.IsOAuthToken(cfg.AnthropicKey),
+		IsOAuth:       config.IsOAuthToken(apiKey),
+		BaseURL:       cfg.LLMBaseURL,
 	})
 
 	// Create Memories client.
