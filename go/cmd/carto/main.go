@@ -107,7 +107,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	})
 
 	// Create FAISS client.
-	faissClient := storage.NewFaissClient(cfg.FaissURL, cfg.FaissAPIKey)
+	faissClient := storage.NewFaissClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
 	// Create signal registry and register git signals.
 	registry := signals.NewRegistry()
@@ -204,7 +204,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	count, _ := cmd.Flags().GetInt("count")
 
 	cfg := config.Load()
-	faissClient := storage.NewFaissClient(cfg.FaissURL, cfg.FaissAPIKey)
+	faissClient := storage.NewFaissClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
 	// If a project is provided, try tier-based retrieval.
 	if project != "" {

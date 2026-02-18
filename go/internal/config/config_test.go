@@ -7,8 +7,8 @@ import (
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	cfg := Load()
-	if cfg.FaissURL != "http://localhost:8900" {
-		t.Errorf("expected default FAISS URL, got %s", cfg.FaissURL)
+	if cfg.MemoriesURL != "http://localhost:8900" {
+		t.Errorf("expected default Memories URL, got %s", cfg.MemoriesURL)
 	}
 	if cfg.HaikuModel != "claude-haiku-4-5-20251001" {
 		t.Errorf("expected default haiku model, got %s", cfg.HaikuModel)
@@ -20,16 +20,26 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
-	os.Setenv("FAISS_URL", "http://custom:9999")
+	os.Setenv("MEMORIES_URL", "http://custom:9999")
 	defer os.Unsetenv("ANTHROPIC_API_KEY")
-	defer os.Unsetenv("FAISS_URL")
+	defer os.Unsetenv("MEMORIES_URL")
 
 	cfg := Load()
 	if cfg.AnthropicKey != "test-key" {
 		t.Errorf("expected test-key, got %s", cfg.AnthropicKey)
 	}
-	if cfg.FaissURL != "http://custom:9999" {
-		t.Errorf("expected custom URL, got %s", cfg.FaissURL)
+	if cfg.MemoriesURL != "http://custom:9999" {
+		t.Errorf("expected custom URL, got %s", cfg.MemoriesURL)
+	}
+}
+
+func TestLoadConfig_LegacyFallback(t *testing.T) {
+	os.Setenv("FAISS_URL", "http://legacy:8900")
+	defer os.Unsetenv("FAISS_URL")
+
+	cfg := Load()
+	if cfg.MemoriesURL != "http://legacy:8900" {
+		t.Errorf("expected legacy FAISS_URL fallback, got %s", cfg.MemoriesURL)
 	}
 }
 
