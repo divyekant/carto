@@ -383,6 +383,46 @@ func TestDetectModules_RustCargo(t *testing.T) {
 	}
 }
 
+// --- Binary File Detection Tests ---
+
+func TestIsBinary_Extension(t *testing.T) {
+	binaryExts := []string{
+		".pyc", ".pyo", ".o", ".so", ".dylib", ".dll", ".exe", ".wasm",
+		".class", ".jar", ".war", ".onnx", ".bin", ".dat", ".db", ".sqlite",
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".pdf",
+		".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+		".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+		".mp3", ".mp4", ".avi", ".mov", ".wav",
+		".ttf", ".woff", ".woff2", ".eot",
+	}
+	for _, ext := range binaryExts {
+		if !isBinary("test"+ext, nil) {
+			t.Errorf("expected %s to be detected as binary", ext)
+		}
+	}
+}
+
+func TestIsBinary_TextExtensions(t *testing.T) {
+	textExts := []string{".go", ".py", ".js", ".ts", ".rs", ".java", ".md", ".txt", ".yaml", ".json", ".toml", ".html", ".css"}
+	for _, ext := range textExts {
+		if isBinary("test"+ext, nil) {
+			t.Errorf("expected %s to NOT be detected as binary", ext)
+		}
+	}
+}
+
+func TestIsBinary_MagicBytes(t *testing.T) {
+	binaryContent := []byte("hello\x00world")
+	if !isBinary("unknown_file", binaryContent) {
+		t.Error("expected file with null bytes to be detected as binary")
+	}
+
+	textContent := []byte("func main() { fmt.Println(\"hello\") }")
+	if isBinary("unknown_file", textContent) {
+		t.Error("expected text content to NOT be detected as binary")
+	}
+}
+
 // --- Full Scan Integration Test ---
 
 func TestScan_Integration(t *testing.T) {
