@@ -1,8 +1,22 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Layout } from './components/Layout'
+import Dashboard from './pages/Dashboard'
+import IndexRun from './pages/IndexRun'
+import Query from './pages/Query'
+import Settings from './pages/Settings'
+
 function App() {
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
-      <h1 className="text-3xl font-bold">Carto</h1>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/index" element={<IndexRun />} />
+          <Route path="/query" element={<Query />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 
