@@ -41,6 +41,7 @@ func TestCLI_HelpExitsClean(t *testing.T) {
 	root.AddCommand(modulesCmd())
 	root.AddCommand(patternsCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(serveCmd())
 
 	root.SetArgs([]string{"--help"})
 	err := root.Execute()
