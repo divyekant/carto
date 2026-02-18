@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropic/indexer/internal/atoms"
-	"github.com/anthropic/indexer/internal/llm"
+	"github.com/divyekant/carto/internal/atoms"
+	"github.com/divyekant/carto/internal/llm"
 )
 
 // mockLLM implements LLMClient for testing.
@@ -191,7 +191,7 @@ func TestAnalyzeModule(t *testing.T) {
 	}
 }
 
-func TestAnalyzeModule_UsesOpus(t *testing.T) {
+func TestAnalyzeModule_UsesDeep(t *testing.T) {
 	mock := &mockLLM{
 		responses: map[string]string{
 			"auth": validModuleResponse,
@@ -211,8 +211,8 @@ func TestAnalyzeModule_UsesOpus(t *testing.T) {
 	if len(mock.tiers) != 1 {
 		t.Fatalf("expected 1 tier recorded, got %d", len(mock.tiers))
 	}
-	if mock.tiers[0] != llm.TierOpus {
-		t.Errorf("tier: got %q, want %q", mock.tiers[0], llm.TierOpus)
+	if mock.tiers[0] != llm.TierDeep {
+		t.Errorf("tier: got %q, want %q", mock.tiers[0], llm.TierDeep)
 	}
 }
 
@@ -263,14 +263,14 @@ func TestSynthesizeSystem(t *testing.T) {
 		t.Errorf("Patterns[1]: got %q, want substring %q", result.Patterns[1], "Interface-based")
 	}
 
-	// Verify the LLM was called with Opus tier.
+	// Verify the LLM was called with deep tier.
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 	if len(mock.tiers) != 1 {
 		t.Fatalf("expected 1 tier, got %d", len(mock.tiers))
 	}
-	if mock.tiers[0] != llm.TierOpus {
-		t.Errorf("tier: got %q, want %q", mock.tiers[0], llm.TierOpus)
+	if mock.tiers[0] != llm.TierDeep {
+		t.Errorf("tier: got %q, want %q", mock.tiers[0], llm.TierDeep)
 	}
 }
 

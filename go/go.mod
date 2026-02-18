@@ -1,4 +1,4 @@
-module github.com/anthropic/indexer
+module github.com/divyekant/carto
 
 go 1.25.1
 

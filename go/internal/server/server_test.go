@@ -11,8 +11,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/anthropic/indexer/internal/config"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -209,10 +209,10 @@ func TestQueryEndpoint_MissingText(t *testing.T) {
 func TestGetConfig(t *testing.T) {
 	cfg := config.Config{
 		MemoriesURL:   "http://localhost:8900",
-		MemoriesKey:   "god-is-an-astronaut-key",
+		MemoriesKey:   "test-memories-key",
 		AnthropicKey:  "sk-ant-api03-very-long-secret-key-value",
-		HaikuModel:    "claude-haiku-4-5-20251001",
-		OpusModel:     "claude-opus-4-6",
+		FastModel:    "claude-haiku-4-5-20251001",
+		DeepModel:     "claude-opus-4-6",
 		MaxConcurrent: 10,
 		LLMProvider:   "anthropic",
 		LLMApiKey:     "sk-llm-0123456789abcdef-secret",
@@ -238,8 +238,8 @@ func TestGetConfig(t *testing.T) {
 	if resp.MemoriesURL != "http://localhost:8900" {
 		t.Errorf("unexpected memories_url: %s", resp.MemoriesURL)
 	}
-	if resp.HaikuModel != "claude-haiku-4-5-20251001" {
-		t.Errorf("unexpected haiku_model: %s", resp.HaikuModel)
+	if resp.FastModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("unexpected fast_model: %s", resp.FastModel)
 	}
 
 	// Secret fields should be redacted: first 8 + **** + last 4.
@@ -264,14 +264,14 @@ func TestGetConfig(t *testing.T) {
 func TestPatchConfig(t *testing.T) {
 	cfg := config.Config{
 		MemoriesURL:   "http://localhost:8900",
-		HaikuModel:    "claude-haiku-4-5-20251001",
+		FastModel:    "claude-haiku-4-5-20251001",
 		MaxConcurrent: 10,
 	}
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
 	srv := New(cfg, memoriesClient, "", nil)
 
-	// PATCH to update haiku_model and max_concurrent.
-	patchBody := strings.NewReader(`{"haiku_model": "claude-haiku-4-5-20260101", "max_concurrent": 20}`)
+	// PATCH to update fast_model and max_concurrent.
+	patchBody := strings.NewReader(`{"fast_model": "claude-haiku-4-5-20260101", "max_concurrent": 20}`)
 	patchReq := httptest.NewRequest(http.MethodPatch, "/api/config", patchBody)
 	patchReq.Header.Set("Content-Type", "application/json")
 	pw := httptest.NewRecorder()
@@ -295,8 +295,8 @@ func TestPatchConfig(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if resp.HaikuModel != "claude-haiku-4-5-20260101" {
-		t.Errorf("expected patched haiku_model, got %q", resp.HaikuModel)
+	if resp.FastModel != "claude-haiku-4-5-20260101" {
+		t.Errorf("expected patched fast_model, got %q", resp.FastModel)
 	}
 	if resp.MaxConcurrent != 20 {
 		t.Errorf("expected patched max_concurrent=20, got %d", resp.MaxConcurrent)

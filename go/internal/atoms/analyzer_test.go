@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropic/indexer/internal/llm"
+	"github.com/divyekant/carto/internal/llm"
 )
 
 // mockLLM implements LLMClient for testing.

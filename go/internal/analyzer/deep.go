@@ -7,13 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/anthropic/indexer/internal/atoms"
-	"github.com/anthropic/indexer/internal/history"
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/signals"
+	"github.com/divyekant/carto/internal/atoms"
+	"github.com/divyekant/carto/internal/history"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/signals"
 )
 
-// LLMClient is the interface needed for Opus calls.
+// LLMClient is the interface needed for deep-tier calls.
 type LLMClient interface {
 	CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteOptions) (json.RawMessage, error)
 }
@@ -41,7 +41,7 @@ type Zone struct {
 	Files  []string `json:"files"`
 }
 
-// ModuleAnalysis is the output of per-module Opus analysis.
+// ModuleAnalysis is the output of per-module deep-tier analysis.
 type ModuleAnalysis struct {
 	ModuleName   string       `json:"module_name"`
 	Wiring       []Dependency `json:"wiring"`
@@ -49,13 +49,13 @@ type ModuleAnalysis struct {
 	ModuleIntent string       `json:"module_intent"`
 }
 
-// SystemSynthesis is the output of system-wide Opus synthesis.
+// SystemSynthesis is the output of system-wide deep-tier synthesis.
 type SystemSynthesis struct {
 	Blueprint string   `json:"blueprint"`
 	Patterns  []string `json:"patterns"`
 }
 
-// DeepAnalyzer runs Opus on modules and system-wide.
+// DeepAnalyzer runs deep-tier analysis on modules and system-wide.
 type DeepAnalyzer struct {
 	llm LLMClient
 }
@@ -124,12 +124,12 @@ func buildModulePrompt(input ModuleInput) string {
 	return b.String()
 }
 
-// AnalyzeModule sends a single module's data to Opus and returns wiring,
+// AnalyzeModule sends a single module's data to the deep tier and returns wiring,
 // zones, and intent analysis.
 func (d *DeepAnalyzer) AnalyzeModule(module ModuleInput) (*ModuleAnalysis, error) {
 	prompt := buildModulePrompt(module)
 
-	raw, err := d.llm.CompleteJSON(prompt, llm.TierOpus, &llm.CompleteOptions{
+	raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
 		System:    "You are a software architecture analyst. Analyze this module and respond with JSON.",
 		MaxTokens: 8192,
 	})
@@ -185,12 +185,12 @@ func buildSynthesisPrompt(modules []ModuleAnalysis) string {
 	return b.String()
 }
 
-// SynthesizeSystem takes all module analyses, sends them to Opus, and returns
+// SynthesizeSystem takes all module analyses, sends them to the deep tier, and returns
 // a system-level blueprint and discovered patterns.
 func (d *DeepAnalyzer) SynthesizeSystem(modules []ModuleAnalysis) (*SystemSynthesis, error) {
 	prompt := buildSynthesisPrompt(modules)
 
-	raw, err := d.llm.CompleteJSON(prompt, llm.TierOpus, &llm.CompleteOptions{
+	raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
 		System:    "You are a senior software architect. Synthesize these module analyses into a system-level understanding. Respond with JSON.",
 		MaxTokens: 8192,
 	})

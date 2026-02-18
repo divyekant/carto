@@ -15,8 +15,8 @@ import (
 type Tier string
 
 const (
-	TierHaiku Tier = "haiku"
-	TierOpus  Tier = "opus"
+	TierFast Tier = "fast"
+	TierDeep Tier = "deep"
 )
 
 // OAuth constants matching the WebChat/Claude CLI pattern.
@@ -25,15 +25,15 @@ const (
 	OAuthTokenURL = "https://console.anthropic.com/v1/oauth/token"
 	OAuthBeta     = "oauth-2025-04-20"
 	ThinkingBeta  = "interleaved-thinking-2025-05-14"
-	UserAgent     = "carto/0.2.0 (external, cli)"
+	UserAgent     = "carto/0.3.0 (external, cli)"
 )
 
 // Options configures the Anthropic API client.
 type Options struct {
 	APIKey        string
 	BaseURL       string
-	HaikuModel    string
-	OpusModel     string
+	FastModel     string
+	DeepModel     string
 	MaxConcurrent int
 	IsOAuth       bool
 }
@@ -65,11 +65,11 @@ func NewClient(opts Options) *Client {
 	if opts.BaseURL == "" {
 		opts.BaseURL = "https://api.anthropic.com"
 	}
-	if opts.HaikuModel == "" {
-		opts.HaikuModel = "claude-haiku-4-5-20251001"
+	if opts.FastModel == "" {
+		opts.FastModel = "claude-haiku-4-5-20251001"
 	}
-	if opts.OpusModel == "" {
-		opts.OpusModel = "claude-opus-4-6"
+	if opts.DeepModel == "" {
+		opts.DeepModel = "claude-opus-4-6"
 	}
 	if opts.MaxConcurrent <= 0 {
 		opts.MaxConcurrent = 10
@@ -173,9 +173,9 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 	c.sem <- struct{}{}
 	defer func() { <-c.sem }()
 
-	model := c.opts.HaikuModel
-	if tier == TierOpus {
-		model = c.opts.OpusModel
+	model := c.opts.FastModel
+	if tier == TierDeep {
+		model = c.opts.DeepModel
 	}
 
 	maxTokens := 4096
@@ -232,7 +232,7 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 
 		req.Header.Set("Authorization", "Bearer "+token)
 		beta := OAuthBeta
-		if tier == TierOpus {
+		if tier == TierDeep {
 			beta += "," + ThinkingBeta
 		}
 		req.Header.Set("Anthropic-Beta", beta)

@@ -12,15 +12,15 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/anthropic/indexer/internal/analyzer"
-	"github.com/anthropic/indexer/internal/atoms"
-	"github.com/anthropic/indexer/internal/chunker"
-	"github.com/anthropic/indexer/internal/history"
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/manifest"
-	"github.com/anthropic/indexer/internal/scanner"
-	"github.com/anthropic/indexer/internal/signals"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/analyzer"
+	"github.com/divyekant/carto/internal/atoms"
+	"github.com/divyekant/carto/internal/chunker"
+	"github.com/divyekant/carto/internal/history"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/manifest"
+	"github.com/divyekant/carto/internal/scanner"
+	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 // LLMClient is the interface shared by atoms.LLMClient and analyzer.LLMClient.
@@ -54,7 +54,7 @@ type Result struct {
 
 // Run executes the full indexing pipeline across five phases:
 //  1. Scan — discover files and modules
-//  2. Chunk + Atoms — split files into chunks and analyze with Haiku
+//  2. Chunk + Atoms — split files into chunks and analyze with fast-tier LLM
 //  3. History + Signals — extract git history and external signals
 //  4. Deep Analysis — per-module wiring/zones analysis and system synthesis
 //  5. Store — persist all layers to Memories and update manifest

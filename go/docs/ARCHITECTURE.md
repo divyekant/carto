@@ -9,7 +9,7 @@ and stores layered context in [Memories](https://github.com/divyekant/memories) 
 multi-layer knowledge graph that captures everything from individual function
 summaries to system-wide architectural blueprints.
 
-Carto is written in pure Go (module `github.com/anthropic/indexer`). The only
+Carto is written in pure Go (module `github.com/divyekant/carto`). The only
 CGO dependency is Tree-sitter, which embeds C parsers for AST-based code
 chunking. The system communicates with two external services over HTTP: the
 Anthropic Messages API for LLM inference and a [Memories](https://github.com/divyekant/memories) server for
@@ -112,7 +112,7 @@ For each module's files (filtered for incremental changes if applicable):
    `"module"` chunk. If a supported language produces no extractable nodes,
    the whole file is also returned as a single chunk.
 
-2. **Atom analysis**: `atoms.AnalyzeBatch()` sends each chunk to Haiku in
+2. **Atom analysis**: `atoms.AnalyzeBatch()` sends each chunk to the fast-tier LLM in
    parallel (controlled by a buffered channel semaphore with `MaxWorkers`
    slots). Each Haiku call produces an `Atom` containing:
    - `name` / `kind` -- carried from the chunk
@@ -160,10 +160,10 @@ ModuleInputs --> analyzer.AnalyzeModules() --> []ModuleAnalysis
 ModuleAnalyses --> analyzer.SynthesizeSystem() --> SystemSynthesis
 ```
 
-The deep analyzer uses Opus for two stages:
+The deep analyzer uses the deep-tier LLM for two stages:
 
 1. **Per-module analysis**: `AnalyzeModules()` sends each module's atoms,
-   history, and signals to Opus in parallel (same semaphore pattern). The
+   history, and signals to the deep-tier LLM in parallel (same semaphore pattern). The
    prompt includes formatted atom summaries with imports/exports, file
    history with churn scores and authorship, and external signals. Opus
    returns a `ModuleAnalysis` containing:
@@ -174,7 +174,7 @@ The deep analyzer uses Opus for two stages:
    - `module_intent` -- 1-3 sentence summary of the module's purpose
 
 2. **System synthesis**: `SynthesizeSystem()` takes all successful module
-   analyses and sends them to Opus in a single call. The prompt includes
+   analyses and sends them to the deep-tier LLM in a single call. The prompt includes
    each module's intent, zones, and wiring. Opus returns a
    `SystemSynthesis` containing:
    - `blueprint` -- narrative description of the overall system architecture
@@ -230,8 +230,8 @@ specific purpose in the context hierarchy:
 ### Layer 1a: Atoms
 
 - **Content**: Per-chunk summaries, clarified code, imports, exports
-- **Source**: `atoms.Analyzer.AnalyzeBatch()` via Haiku
-- **LLM cost**: One Haiku call per code chunk (high volume, low cost)
+- **Source**: `atoms.Analyzer.AnalyzeBatch()` via fast-tier LLM
+- **LLM cost**: One fast-tier call per code chunk (high volume, low cost)
 - **Schema**: `atoms.Atom` -- `name`, `kind`, `file_path`, `summary`,
   `clarified_code`, `imports`, `exports`, `start_line`, `end_line`
 - **Memories tag**: `carto/{project}/{module}/layer:atoms`
@@ -265,8 +265,8 @@ specific purpose in the context hierarchy:
 ### Layer 2: Wiring
 
 - **Content**: Cross-component dependency graph with intent annotations
-- **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via Opus
-- **LLM cost**: One Opus call per module (low volume, high cost)
+- **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via deep-tier LLM
+- **LLM cost**: One deep-tier call per module (low volume, high cost)
 - **Schema**: `analyzer.Dependency` -- `From` (source unit), `To` (target
   unit), `Reason` (why they are connected)
 - **Memories tag**: `carto/{project}/{module}/layer:wiring`
@@ -276,7 +276,7 @@ specific purpose in the context hierarchy:
 ### Layer 3: Zones
 
 - **Content**: Business domain groupings with purpose statements
-- **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via Opus (same call
+- **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via deep-tier LLM (same call
   as wiring)
 - **LLM cost**: Included in the per-module Opus call
 - **Schema**: `analyzer.Zone` -- `Name` (domain name), `Intent` (purpose
@@ -289,8 +289,8 @@ specific purpose in the context hierarchy:
 
 - **Content**: System-level architectural narrative and discovered coding
   conventions
-- **Source**: `analyzer.DeepAnalyzer.SynthesizeSystem()` via Opus
-- **LLM cost**: One Opus call for the entire project
+- **Source**: `analyzer.DeepAnalyzer.SynthesizeSystem()` via deep-tier LLM
+- **LLM cost**: One deep-tier call for the entire project
 - **Schema**: `analyzer.SystemSynthesis` -- `Blueprint` (narrative string),
   `Patterns` (array of pattern descriptions)
 - **Memories tags**: `carto/{project}/_system/layer:blueprint` and
@@ -300,24 +300,24 @@ specific purpose in the context hierarchy:
 
 ---
 
-## 4. Two-Tier LLM Strategy
+## 4. Two-Tier LLM Strategy (Provider-Agnostic)
 
 Carto uses two model tiers to balance cost, speed, and analytical depth:
 
-### Haiku Tier (Fast, Cheap)
+### Fast Tier (High-Volume, Low-Cost)
 
 - **Default model**: `claude-haiku-4-5-20251001`
-- **Configurable via**: `CARTO_HAIKU_MODEL` environment variable
+- **Configurable via**: `CARTO_FAST_MODEL` environment variable
 - **Used for**: Atom analysis (Layer 1a)
 - **Call pattern**: One call per code chunk -- high volume
 - **Max tokens**: 4,096 per call
 - **System prompt**: `"You are a code analysis assistant. Respond only with valid JSON."`
 - **Output**: Structured JSON with clarified code, summary, imports, exports
 
-### Opus Tier (Powerful, Expensive)
+### Deep Tier (Low-Volume, High-Cost)
 
 - **Default model**: `claude-opus-4-6`
-- **Configurable via**: `CARTO_OPUS_MODEL` environment variable
+- **Configurable via**: `CARTO_DEEP_MODEL` environment variable
 - **Used for**: Per-module deep analysis (Layer 2+3) and system synthesis
   (Layer 4)
 - **Call pattern**: One call per module + one synthesis call -- low volume

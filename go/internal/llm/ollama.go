@@ -11,27 +11,27 @@ import (
 
 // OllamaProvider implements Provider for local Ollama instances.
 type OllamaProvider struct {
-	baseURL    string
-	haikuModel string
-	opusModel  string
-	http       http.Client
+	baseURL   string
+	fastModel string
+	deepModel string
+	http      http.Client
 }
 
 // NewOllamaProvider creates a provider for a local Ollama server.
-func NewOllamaProvider(baseURL, haikuModel, opusModel string) *OllamaProvider {
+func NewOllamaProvider(baseURL, fastModel, deepModel string) *OllamaProvider {
 	return &OllamaProvider{
-		baseURL:    baseURL,
-		haikuModel: haikuModel,
-		opusModel:  opusModel,
+		baseURL:   baseURL,
+		fastModel: fastModel,
+		deepModel: deepModel,
 	}
 }
 
 func (p *OllamaProvider) Name() string { return "ollama" }
 
 func (p *OllamaProvider) Complete(ctx context.Context, req CompletionRequest) (string, error) {
-	model := p.haikuModel
+	model := p.fastModel
 	if req.IsDeepTier {
-		model = p.opusModel
+		model = p.deepModel
 	}
 
 	prompt := req.User

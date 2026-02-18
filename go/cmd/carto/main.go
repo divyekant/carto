@@ -11,19 +11,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anthropic/indexer/internal/config"
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/manifest"
-	"github.com/anthropic/indexer/internal/patterns"
-	"github.com/anthropic/indexer/internal/pipeline"
-	"github.com/anthropic/indexer/internal/scanner"
-	"github.com/anthropic/indexer/internal/server"
-	"github.com/anthropic/indexer/internal/signals"
-	"github.com/anthropic/indexer/internal/storage"
-	cartoWeb "github.com/anthropic/indexer/web"
+	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/manifest"
+	"github.com/divyekant/carto/internal/patterns"
+	"github.com/divyekant/carto/internal/pipeline"
+	"github.com/divyekant/carto/internal/scanner"
+	"github.com/divyekant/carto/internal/server"
+	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/storage"
+	cartoWeb "github.com/divyekant/carto/web"
 )
 
-var version = "0.2.0"
+var version = "0.3.0"
 
 // ANSI escape codes for colored output.
 const (
@@ -111,8 +111,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// Create LLM client.
 	llmClient := llm.NewClient(llm.Options{
 		APIKey:        apiKey,
-		HaikuModel:    cfg.HaikuModel,
-		OpusModel:     cfg.OpusModel,
+		FastModel:     cfg.FastModel,
+		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,

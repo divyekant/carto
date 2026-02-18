@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/signals"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 // ── Integration Mocks ───────────────────────────────────────────────────
@@ -23,8 +23,8 @@ type integrationLLM struct {
 	mu        sync.Mutex
 	calls     int
 	tiers     []llm.Tier
-	haikuCnt  int
-	opusCnt   int
+	fastCnt  int
+	deepCnt   int
 }
 
 func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteOptions) (json.RawMessage, error) {
@@ -34,8 +34,8 @@ func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Co
 	m.tiers = append(m.tiers, tier)
 
 	switch tier {
-	case llm.TierHaiku:
-		m.haikuCnt++
+	case llm.TierFast:
+		m.fastCnt++
 		// Atom analysis response: return valid JSON matching atoms.llmResponse.
 		return json.RawMessage(`{
 			"clarified_code": "func example() { /* clarified */ }",
@@ -44,8 +44,8 @@ func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Co
 			"exports": ["example"]
 		}`), nil
 
-	case llm.TierOpus:
-		m.opusCnt++
+	case llm.TierDeep:
+		m.deepCnt++
 		// Distinguish synthesis from module analysis by prompt content.
 		if strings.Contains(prompt, "Synthesize") {
 			return json.RawMessage(`{
@@ -73,10 +73,10 @@ func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Co
 	return json.RawMessage(`{}`), nil
 }
 
-func (m *integrationLLM) getCounts() (total, haiku, opus int) {
+func (m *integrationLLM) getCounts() (total, fast, deep int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.calls, m.haikuCnt, m.opusCnt
+	return m.calls, m.fastCnt, m.deepCnt
 }
 
 // integrationMemories is a thread-safe in-memory Memories mock that stores all
@@ -329,16 +329,16 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	// ── Verify LLM calls ────────────────────────────────────────────
 
-	totalCalls, haikuCalls, opusCalls := llmClient.getCounts()
+	totalCalls, fastCalls, deepCalls := llmClient.getCounts()
 
 	if totalCalls < 3 {
 		t.Errorf("total LLM calls: got %d, want >= 3 (atoms + module analysis + synthesis)", totalCalls)
 	}
-	if haikuCalls < 1 {
-		t.Errorf("Haiku calls: got %d, want >= 1 (atom analysis)", haikuCalls)
+	if fastCalls < 1 {
+		t.Errorf("fast-tier calls: got %d, want >= 1 (atom analysis)", fastCalls)
 	}
-	if opusCalls < 2 {
-		t.Errorf("Opus calls: got %d, want >= 2 (module analysis + synthesis)", opusCalls)
+	if deepCalls < 2 {
+		t.Errorf("deep-tier calls: got %d, want >= 2 (module analysis + synthesis)", deepCalls)
 	}
 
 	// ── Verify Memories layers ──────────────────────────────────────

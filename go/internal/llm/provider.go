@@ -38,13 +38,13 @@ func NewProvider(name string, opts Options) (Provider, error) {
 				baseURL = "https://api.openai.com"
 			}
 		}
-		return NewOpenAIProvider(baseURL, opts.APIKey, opts.HaikuModel, opts.OpusModel), nil
+		return NewOpenAIProvider(baseURL, opts.APIKey, opts.FastModel, opts.DeepModel), nil
 	case "ollama":
 		baseURL := opts.BaseURL
 		if baseURL == "" {
 			baseURL = "http://localhost:11434"
 		}
-		return NewOllamaProvider(baseURL, opts.HaikuModel, opts.OpusModel), nil
+		return NewOllamaProvider(baseURL, opts.FastModel, opts.DeepModel), nil
 	default:
 		return nil, fmt.Errorf("llm: unknown provider %q (supported: anthropic, openai, openrouter, ollama)", name)
 	}

@@ -32,13 +32,13 @@ carto index .
 
 - Go 1.25 or later
 - An [Anthropic API key](https://console.anthropic.com/) (standard `sk-ant-api03-` keys or OAuth `sk-ant-oat01-` tokens)
-- A running [[Memories](https://github.com/divyekant/memories) server](https://github.com/anthropic/memories) (default: `http://localhost:8900`)
+- A running [Memories](https://github.com/divyekant/memories) server (default: `http://localhost:8900`)
 
 ### Build
 
 ```bash
-git clone https://github.com/divyekant/indexer.git
-cd indexer/go
+git clone https://github.com/divyekant/carto.git
+cd carto
 go build -o carto ./cmd/carto
 ```
 
@@ -76,12 +76,12 @@ Phase 1: Scan        Walks the directory tree, respects .gitignore,
                      detects module boundaries (go.mod, package.json, etc.)
 
 Phase 2: Chunk       Tree-sitter AST parsing splits files into semantic chunks.
-         + Atoms     Claude Haiku produces structured atom summaries for each chunk.
+         + Atoms     fast-tier LLM produces structured atom summaries for each chunk.
 
 Phase 3: History     Extracts git history (commits, churn, ownership).
          + Signals   Plugin-based external signals (tickets, PRs, docs).
 
-Phase 4: Deep        Claude Opus analyzes cross-component wiring, identifies
+Phase 4: Deep        deep-tier LLM analyzes cross-component wiring, identifies
          Analysis    business domain zones, and produces an architecture narrative.
 
 Phase 5: Store       Serializes all 7 layers into Memories with source tags.
@@ -95,12 +95,12 @@ Each layer captures a different dimension of understanding. Higher layers depend
 | Layer | Name | LLM | Description |
 |-------|------|-----|-------------|
 | 0 | Map | None | Files, modules, detected languages |
-| 1a | Atoms | Haiku | Per-chunk summaries with intent and role annotations |
+| 1a | Atoms | Fast | Per-chunk summaries with intent and role annotations |
 | 1b | History | None | Git commits, file churn, ownership patterns |
 | 1c | Signals | None | External context from tickets, PRs, and other sources |
-| 2 | Wiring | Opus | Cross-component dependency analysis |
-| 3 | Zones | Opus | Business domain groupings and boundaries |
-| 4 | Blueprint | Opus | System architecture narrative and design patterns |
+| 2 | Wiring | Deep | Cross-component dependency analysis |
+| 3 | Zones | Deep | Business domain groupings and boundaries |
+| 4 | Blueprint | Deep | System architecture narrative and design patterns |
 
 ### Tiered Retrieval
 
@@ -207,10 +207,13 @@ Carto is configured entirely through environment variables.
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | -- | Anthropic API key or OAuth token |
 | `MEMORIES_URL` | No | `http://localhost:8900` | [Memories](https://github.com/divyekant/memories) server URL |
-| `MEMORIES_API_KEY` | No | `god-is-an-astronaut` | Memories server API key |
-| `CARTO_HAIKU_MODEL` | No | `claude-haiku-4-5-20251001` | Model for atom analysis (Phase 2) |
-| `CARTO_OPUS_MODEL` | No | `claude-opus-4-6` | Model for deep analysis (Phase 4) |
+| `MEMORIES_API_KEY` | No | -- | Memories server API key |
+| `CARTO_FAST_MODEL` | No | `claude-haiku-4-5-20251001` | Fast-tier model for atom analysis (Phase 2) |
+| `CARTO_DEEP_MODEL` | No | `claude-opus-4-6` | Deep-tier model for deep analysis (Phase 4) |
 | `CARTO_MAX_CONCURRENT` | No | `10` | Maximum concurrent LLM requests |
+| `LLM_PROVIDER` | No | `anthropic` | LLM provider: `anthropic`, `openai`, `ollama` |
+| `LLM_API_KEY` | No | -- | API key for non-Anthropic providers |
+| `LLM_BASE_URL` | No | -- | Base URL for non-Anthropic providers |
 
 ### Authentication
 
@@ -228,12 +231,12 @@ The authentication method is detected automatically from the key prefix.
 ```
 cmd/carto/              CLI entry point (Cobra commands)
 internal/
-  analyzer/             Deep analysis with Opus (wiring, zones, blueprint)
-  atoms/                Haiku-powered atom summaries for code chunks
+  analyzer/             Deep analysis (wiring, zones, blueprint)
+  atoms/                Fast-tier atom summaries for code chunks
   chunker/              Tree-sitter AST chunking engine
   config/               Environment-based configuration loading
   history/              Git history extraction (commits, churn)
-  llm/                  Anthropic API client (standard + OAuth auth)
+  llm/                  Multi-provider LLM client (Anthropic, OpenAI, Ollama)
   manifest/             Incremental indexing manifest (hash-based change detection)
   patterns/             Skill file generation (CLAUDE.md, .cursorrules)
   pipeline/             5-phase orchestrator wiring all components together
@@ -245,7 +248,7 @@ internal/
 ### Key Design Decisions
 
 - **Tree-sitter for AST parsing** -- provides language-aware chunking that respects function and class boundaries, rather than naive line-based splitting.
-- **Two-tier LLM strategy** -- Haiku handles high-volume atom summaries (fast, cheap), while Opus handles low-volume deep analysis (thorough, expensive).
+- **Two-tier LLM strategy** -- The fast tier handles high-volume atom summaries (cheap), while the deep tier handles low-volume architectural analysis (thorough).
 - **Layered storage with source tags** -- each layer is stored with a structured source tag (`carto/{project}/{module}/layer:{layer}`) enabling precise retrieval and cleanup.
 - **Manifest-based incremental indexing** -- SHA-256 hashes track file changes so subsequent runs only process what changed.
 - **Semaphore-based concurrency** -- a configurable concurrency limit prevents overwhelming the Anthropic API with parallel requests.
@@ -303,6 +306,39 @@ go test ./...
 ```bash
 go build -o carto ./cmd/carto
 ```
+
+## Web UI
+
+Carto includes a built-in web dashboard for browsing indexed projects, exploring modules, and querying the index visually.
+
+```bash
+carto serve --port 8950 --projects-dir /path/to/projects
+```
+
+Open `http://localhost:8950` in your browser.
+
+---
+
+## Docker
+
+```bash
+docker build -t carto .
+docker run -p 8950:8950 \
+  -e ANTHROPIC_API_KEY="sk-ant-api03-..." \
+  -e MEMORIES_URL="http://host.docker.internal:8900" \
+  -e MEMORIES_API_KEY="your-key" \
+  -v /path/to/projects:/projects \
+  carto
+```
+
+See [docker-compose.yml](docker-compose.yml) for a complete multi-service setup.
+
+---
+
+## Integrations
+
+- **[QUICKSTART-LLM.md](integrations/QUICKSTART-LLM.md)** -- LLM-friendly quickstart guide for AI assistants
+- **[Agent Write-Back](integrations/agent-writeback.md)** -- How to keep the index current from Claude Code, Codex, Cursor, and OpenClaw
 
 ---
 

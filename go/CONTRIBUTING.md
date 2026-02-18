@@ -19,8 +19,8 @@ a pull request.
 
 ```bash
 # Clone the repository
-git clone https://github.com/divyekant/indexer.git
-cd indexer/go
+git clone https://github.com/divyekant/carto.git
+cd carto
 
 # Build the CLI
 go build -o carto ./cmd/carto
@@ -60,12 +60,12 @@ All application packages live under `internal/`.
 
 | Package | Description |
 |---------|-------------|
-| `internal/analyzer` | Deep analysis phase (Layer 2-4). Uses Opus-tier LLM calls to produce wiring graphs, business zones, and system blueprints from atoms, history, and signals. |
-| `internal/atoms` | Atom extraction phase (Layer 1a). Sends code chunks to Haiku-tier LLM to produce clarified, summarized code units with imports and dependencies. |
+| `internal/analyzer` | Deep analysis phase (Layer 2-4). Uses deep-tier LLM calls to produce wiring graphs, business zones, and system blueprints from atoms, history, and signals. |
+| `internal/atoms` | Atom extraction phase (Layer 1a). Sends code chunks to the fast-tier LLM to produce clarified, summarized code units with imports and dependencies. |
 | `internal/chunker` | AST-based code splitting. Uses Tree-sitter grammars to break source files into logical chunks (functions, classes, types). |
 | `internal/config` | Configuration loading from environment variables (Memories URL, API keys, model names, concurrency). |
 | `internal/history` | Git history extraction (Layer 1b). Extracts per-file commit history, authorship, churn scores, and PR references. |
-| `internal/llm` | Anthropic API client. Handles both API-key and OAuth authentication, model tiering (Haiku/Opus), and structured JSON responses. |
+| `internal/llm` | Multi-provider LLM client. Handles API-key and OAuth authentication, model tiering (Fast/Deep), and structured JSON responses. Supports Anthropic, OpenAI-compatible, and Ollama providers. |
 | `internal/manifest` | Incremental indexing manifest. Tracks file hashes and timestamps to detect changed, added, and deleted files between runs. |
 | `internal/patterns` | Skill file generation (Layer 5). Produces CLAUDE.md and .cursorrules files from discovered architectural patterns, zones, and blueprints. |
 | `internal/pipeline` | Pipeline orchestrator. Wires together scanning, chunking, atom analysis, history extraction, signal collection, deep analysis, and storage into a single indexing flow. |

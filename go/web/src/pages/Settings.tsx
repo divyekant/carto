@@ -16,8 +16,8 @@ interface Config {
   provider?: string
   api_key?: string
   base_url?: string
-  haiku_model?: string
-  opus_model?: string
+  fast_model?: string
+  deep_model?: string
   memories_url?: string
   memories_api_key?: string
   [key: string]: unknown
@@ -127,21 +127,21 @@ export default function Settings() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="haiku_model">Haiku Model</Label>
+              <Label htmlFor="fast_model">Fast Model</Label>
               <Input
-                id="haiku_model"
-                placeholder="claude-3-5-haiku-latest"
-                value={config.haiku_model || ''}
-                onChange={(e) => updateField('haiku_model', e.target.value)}
+                id="fast_model"
+                placeholder="claude-haiku-4-5-20251001"
+                value={config.fast_model || ''}
+                onChange={(e) => updateField('fast_model', e.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="opus_model">Opus Model</Label>
+              <Label htmlFor="deep_model">Deep Model</Label>
               <Input
-                id="opus_model"
-                placeholder="claude-3-5-sonnet-latest"
-                value={config.opus_model || ''}
-                onChange={(e) => updateField('opus_model', e.target.value)}
+                id="deep_model"
+                placeholder="claude-opus-4-6"
+                value={config.deep_model || ''}
+                onChange={(e) => updateField('deep_model', e.target.value)}
               />
             </div>
           </CardContent>
@@ -156,7 +156,7 @@ export default function Settings() {
               <Label htmlFor="memories_url">URL</Label>
               <Input
                 id="memories_url"
-                placeholder="http://localhost:8951"
+                placeholder="http://localhost:8900"
                 value={config.memories_url || ''}
                 onChange={(e) => updateField('memories_url', e.target.value)}
               />

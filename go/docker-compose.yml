@@ -7,11 +7,11 @@ services:
       - ${PROJECTS_DIR:-~/projects}:/projects:ro
     environment:
       - MEMORIES_URL=${MEMORIES_URL:-http://host.docker.internal:8900}
-      - MEMORIES_API_KEY=${MEMORIES_API_KEY:-god-is-an-astronaut}
+      - MEMORIES_API_KEY=${MEMORIES_API_KEY}
       - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-}
-      - CARTO_HAIKU_MODEL=${CARTO_HAIKU_MODEL:-claude-haiku-4-5-20251001}
-      - CARTO_OPUS_MODEL=${CARTO_OPUS_MODEL:-claude-opus-4-6}
+      - CARTO_FAST_MODEL=${CARTO_FAST_MODEL:-claude-haiku-4-5-20251001}
+      - CARTO_DEEP_MODEL=${CARTO_DEEP_MODEL:-claude-opus-4-6}
     extra_hosts:
       - "host.docker.internal:host-gateway"

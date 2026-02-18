@@ -10,8 +10,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.MemoriesURL != "http://localhost:8900" {
 		t.Errorf("expected default Memories URL, got %s", cfg.MemoriesURL)
 	}
-	if cfg.HaikuModel != "claude-haiku-4-5-20251001" {
-		t.Errorf("expected default haiku model, got %s", cfg.HaikuModel)
+	if cfg.FastModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("expected default fast model, got %s", cfg.FastModel)
 	}
 	if cfg.MaxConcurrent != 10 {
 		t.Errorf("expected default concurrency 10, got %d", cfg.MaxConcurrent)

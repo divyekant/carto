@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anthropic/indexer/internal/config"
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/manifest"
-	"github.com/anthropic/indexer/internal/pipeline"
-	"github.com/anthropic/indexer/internal/signals"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/manifest"
+	"github.com/divyekant/carto/internal/pipeline"
+	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 // ProjectInfo describes an indexed project discovered in the projects directory.
@@ -185,8 +185,8 @@ type configResponse struct {
 	MemoriesURL   string `json:"memories_url"`
 	MemoriesKey   string `json:"memories_key"`
 	AnthropicKey  string `json:"anthropic_key"`
-	HaikuModel    string `json:"haiku_model"`
-	OpusModel     string `json:"opus_model"`
+	FastModel     string `json:"fast_model"`
+	DeepModel     string `json:"deep_model"`
 	MaxConcurrent int    `json:"max_concurrent"`
 	LLMProvider   string `json:"llm_provider"`
 	LLMApiKey     string `json:"llm_api_key"`
@@ -203,8 +203,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		MemoriesURL:   cfg.MemoriesURL,
 		MemoriesKey:   redactKey(cfg.MemoriesKey),
 		AnthropicKey:  redactKey(cfg.AnthropicKey),
-		HaikuModel:    cfg.HaikuModel,
-		OpusModel:     cfg.OpusModel,
+		FastModel:     cfg.FastModel,
+		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
 		LLMProvider:   cfg.LLMProvider,
 		LLMApiKey:     redactKey(cfg.LLMApiKey),
@@ -235,13 +235,13 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 			if v, ok := val.(string); ok {
 				s.cfg.AnthropicKey = v
 			}
-		case "haiku_model":
+		case "fast_model":
 			if v, ok := val.(string); ok {
-				s.cfg.HaikuModel = v
+				s.cfg.FastModel = v
 			}
-		case "opus_model":
+		case "deep_model":
 			if v, ok := val.(string); ok {
-				s.cfg.OpusModel = v
+				s.cfg.DeepModel = v
 			}
 		case "max_concurrent":
 			if v, ok := val.(float64); ok {
@@ -331,8 +331,8 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 
 	llmClient := llm.NewClient(llm.Options{
 		APIKey:        apiKey,
-		HaikuModel:    cfg.HaikuModel,
-		OpusModel:     cfg.OpusModel,
+		FastModel:     cfg.FastModel,
+		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,

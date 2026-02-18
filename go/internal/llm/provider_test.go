@@ -3,7 +3,7 @@ package llm
 import "testing"
 
 func TestNewProvider_Anthropic(t *testing.T) {
-	p, err := NewProvider("anthropic", Options{APIKey: "test", HaikuModel: "h", OpusModel: "o", MaxConcurrent: 1})
+	p, err := NewProvider("anthropic", Options{APIKey: "test", FastModel: "h", DeepModel: "o", MaxConcurrent: 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -13,7 +13,7 @@ func TestNewProvider_Anthropic(t *testing.T) {
 }
 
 func TestNewProvider_Empty(t *testing.T) {
-	p, err := NewProvider("", Options{APIKey: "test", HaikuModel: "h", OpusModel: "o", MaxConcurrent: 1})
+	p, err := NewProvider("", Options{APIKey: "test", FastModel: "h", DeepModel: "o", MaxConcurrent: 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestNewProvider_Empty(t *testing.T) {
 }
 
 func TestNewProvider_OpenAI(t *testing.T) {
-	p, err := NewProvider("openai", Options{APIKey: "test", HaikuModel: "gpt-4o-mini", OpusModel: "gpt-4o"})
+	p, err := NewProvider("openai", Options{APIKey: "test", FastModel: "gpt-4o-mini", DeepModel: "gpt-4o"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNewProvider_OpenAI(t *testing.T) {
 }
 
 func TestNewProvider_Ollama(t *testing.T) {
-	p, err := NewProvider("ollama", Options{HaikuModel: "llama3.2", OpusModel: "llama3.2:70b"})
+	p, err := NewProvider("ollama", Options{FastModel: "llama3.2", DeepModel: "llama3.2:70b"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

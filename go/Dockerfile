@@ -46,8 +46,8 @@ RUN mkdir -p /projects
 
 EXPOSE 8950
 
-ENV MEMORIES_URL=http://host.docker.internal:8900
-ENV MEMORIES_API_KEY=god-is-an-astronaut
+# Configure via docker-compose.yml, .env, or docker run -e flags.
+# See .env.example for all available variables.
 
 ENTRYPOINT ["carto"]
 CMD ["serve", "--port", "8950", "--projects-dir", "/projects"]

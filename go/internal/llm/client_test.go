@@ -50,7 +50,7 @@ func TestClient_Complete(t *testing.T) {
 		BaseURL: srv.URL,
 	})
 
-	result, err := c.Complete("hello", TierHaiku, &CompleteOptions{
+	result, err := c.Complete("hello", TierFast, &CompleteOptions{
 		System:    "you are helpful",
 		MaxTokens: 1024,
 	})
@@ -129,7 +129,7 @@ func TestClient_Semaphore(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, errs[idx] = c.Complete("test", TierHaiku, nil)
+			_, errs[idx] = c.Complete("test", TierFast, nil)
 		}(i)
 	}
 	wg.Wait()
@@ -167,7 +167,7 @@ func TestClient_OAuthHeaders(t *testing.T) {
 		IsOAuth: true,
 	})
 
-	_, err := c.Complete("hi", TierOpus, nil)
+	_, err := c.Complete("hi", TierDeep, nil)
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestClient_OAuthHeaders(t *testing.T) {
 	}
 }
 
-func TestClient_OAuthHeaders_HaikuExcludesThinking(t *testing.T) {
+func TestClient_OAuthHeaders_FastExcludesThinking(t *testing.T) {
 	var gotHeaders http.Header
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,12 +210,12 @@ func TestClient_OAuthHeaders_HaikuExcludesThinking(t *testing.T) {
 		IsOAuth: true,
 	})
 
-	_, err := c.Complete("hi", TierHaiku, nil)
+	_, err := c.Complete("hi", TierFast, nil)
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
 	}
 
-	// Haiku must have OAuth beta but NOT thinking beta.
+	// Fast tier must have OAuth beta but NOT thinking beta.
 	got := gotHeaders.Get("Anthropic-Beta")
 	if got != OAuthBeta {
 		t.Errorf("got Anthropic-Beta %q, want %q (OAuth only, no thinking)", got, OAuthBeta)
@@ -256,7 +256,7 @@ func TestClient_CompleteJSON(t *testing.T) {
 
 			c := NewClient(Options{APIKey: "sk-test", BaseURL: srv.URL})
 
-			raw, err := c.CompleteJSON("give json", TierHaiku, nil)
+			raw, err := c.CompleteJSON("give json", TierFast, nil)
 			if err != nil {
 				t.Fatalf("CompleteJSON returned error: %v", err)
 			}
@@ -272,7 +272,7 @@ func TestClient_CompleteJSON(t *testing.T) {
 	}
 }
 
-func TestClient_OpusModel(t *testing.T) {
+func TestClient_DeepModel(t *testing.T) {
 	var gotReq apiRequest
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +291,7 @@ func TestClient_OpusModel(t *testing.T) {
 
 	c := NewClient(Options{APIKey: "sk-test", BaseURL: srv.URL})
 
-	_, err := c.Complete("hi", TierOpus, nil)
+	_, err := c.Complete("hi", TierDeep, nil)
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
 	}

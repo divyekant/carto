@@ -6,7 +6,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/anthropic/indexer/internal/llm"
+	"github.com/divyekant/carto/internal/llm"
 )
 
 // Chunk represents a code unit to analyze (passed in from chunker).
@@ -20,7 +20,7 @@ type Chunk struct {
 	Code      string
 }
 
-// Atom is the output of Haiku analysis -- a clarified, summarized code unit.
+// Atom is the output of fast-tier analysis -- a clarified, summarized code unit.
 type Atom struct {
 	Name          string   `json:"name"`
 	Kind          string   `json:"kind"`
@@ -38,7 +38,7 @@ type LLMClient interface {
 	CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteOptions) (json.RawMessage, error)
 }
 
-// Analyzer processes code chunks through Haiku.
+// Analyzer processes code chunks through the fast tier.
 type Analyzer struct {
 	llm LLMClient
 }
@@ -56,7 +56,7 @@ type llmResponse struct {
 	Exports       []string `json:"exports"`
 }
 
-// buildPrompt constructs the prompt sent to Haiku for a given chunk.
+// buildPrompt constructs the prompt sent to the fast tier for a given chunk.
 func buildPrompt(chunk Chunk) string {
 	return fmt.Sprintf(`Analyze this %s code unit (%s: %s) from %s.
 
@@ -76,12 +76,12 @@ Code:
 		chunk.Language, chunk.Code)
 }
 
-// AnalyzeChunk sends a single code chunk to Haiku for clarification and
+// AnalyzeChunk sends a single code chunk to the fast tier for clarification and
 // summarization, returning the resulting Atom.
 func (a *Analyzer) AnalyzeChunk(chunk Chunk) (*Atom, error) {
 	prompt := buildPrompt(chunk)
 
-	raw, err := a.llm.CompleteJSON(prompt, llm.TierHaiku, &llm.CompleteOptions{
+	raw, err := a.llm.CompleteJSON(prompt, llm.TierFast, &llm.CompleteOptions{
 		System:    "You are a code analysis assistant. Respond only with valid JSON.",
 		MaxTokens: 4096,
 	})

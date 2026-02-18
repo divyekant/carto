@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/anthropic/indexer/internal/config"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 // Server holds the dependencies for the Carto web UI.

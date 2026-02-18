@@ -10,8 +10,8 @@ type Config struct {
 	MemoriesURL   string
 	MemoriesKey   string
 	AnthropicKey  string
-	HaikuModel    string
-	OpusModel     string
+	FastModel     string
+	DeepModel     string
 	MaxConcurrent int
 	LLMProvider   string
 	LLMApiKey     string
@@ -21,10 +21,10 @@ type Config struct {
 func Load() Config {
 	return Config{
 		MemoriesURL:   envOr("MEMORIES_URL", "http://localhost:8900"),
-		MemoriesKey:   envOr("MEMORIES_API_KEY", "god-is-an-astronaut"),
+		MemoriesKey:   os.Getenv("MEMORIES_API_KEY"),
 		AnthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		HaikuModel:    envOr("CARTO_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
-		OpusModel:     envOr("CARTO_OPUS_MODEL", "claude-opus-4-6"),
+		FastModel:     envOr("CARTO_FAST_MODEL", "claude-haiku-4-5-20251001"),
+		DeepModel:     envOr("CARTO_DEEP_MODEL", "claude-opus-4-6"),
 		MaxConcurrent: envOrInt("CARTO_MAX_CONCURRENT", 10),
 		LLMProvider:   envOr("LLM_PROVIDER", "anthropic"),
 		LLMApiKey:     os.Getenv("LLM_API_KEY"),

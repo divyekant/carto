@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropic/indexer/internal/llm"
-	"github.com/anthropic/indexer/internal/signals"
-	"github.com/anthropic/indexer/internal/storage"
+	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 // ── Mock LLM Client ────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 	m.tiers = append(m.tiers, tier)
 
 	switch tier {
-	case llm.TierHaiku:
+	case llm.TierFast:
 		// Atom analysis response.
 		return json.RawMessage(`{
 			"clarified_code": "func example() {}",
@@ -38,7 +38,7 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 			"imports": ["fmt"],
 			"exports": ["example"]
 		}`), nil
-	case llm.TierOpus:
+	case llm.TierDeep:
 		// Check if this is a synthesis call (contains "Synthesize").
 		if strings.Contains(prompt, "Synthesize") {
 			return json.RawMessage(`{
@@ -245,7 +245,7 @@ func TestRun_FullPipeline(t *testing.T) {
 		}
 	}
 
-	// Verify the mock LLM was called with both Haiku and Opus tiers.
+	// Verify the mock LLM was called with both fast and deep tiers.
 	llmClient.mu.Lock()
 	callCount := llmClient.calls
 	tiers := llmClient.tiers
@@ -255,21 +255,21 @@ func TestRun_FullPipeline(t *testing.T) {
 		t.Errorf("LLM calls: got %d, want >= 2 (at least atoms + analysis)", callCount)
 	}
 
-	hasHaiku := false
-	hasOpus := false
+	hasFast := false
+	hasDeep := false
 	for _, tier := range tiers {
-		if tier == llm.TierHaiku {
-			hasHaiku = true
+		if tier == llm.TierFast {
+			hasFast = true
 		}
-		if tier == llm.TierOpus {
-			hasOpus = true
+		if tier == llm.TierDeep {
+			hasDeep = true
 		}
 	}
-	if !hasHaiku {
-		t.Error("LLM was never called with TierHaiku (atoms)")
+	if !hasFast {
+		t.Error("LLM was never called with TierFast (atoms)")
 	}
-	if !hasOpus {
-		t.Error("LLM was never called with TierOpus (analysis)")
+	if !hasDeep {
+		t.Error("LLM was never called with TierDeep (analysis)")
 	}
 
 	// Verify Memories stored data.

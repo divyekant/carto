@@ -12,29 +12,29 @@ import (
 // OpenAIProvider implements Provider for OpenAI-compatible APIs
 // (OpenAI, OpenRouter, and other compatible services).
 type OpenAIProvider struct {
-	baseURL    string
-	apiKey     string
-	haikuModel string
-	opusModel  string
-	http       http.Client
+	baseURL   string
+	apiKey    string
+	fastModel string
+	deepModel string
+	http      http.Client
 }
 
 // NewOpenAIProvider creates a provider for OpenAI-compatible APIs.
-func NewOpenAIProvider(baseURL, apiKey, haikuModel, opusModel string) *OpenAIProvider {
+func NewOpenAIProvider(baseURL, apiKey, fastModel, deepModel string) *OpenAIProvider {
 	return &OpenAIProvider{
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		haikuModel: haikuModel,
-		opusModel:  opusModel,
+		baseURL:   baseURL,
+		apiKey:    apiKey,
+		fastModel: fastModel,
+		deepModel: deepModel,
 	}
 }
 
 func (p *OpenAIProvider) Name() string { return "openai" }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (string, error) {
-	model := p.haikuModel
+	model := p.fastModel
 	if req.IsDeepTier {
-		model = p.opusModel
+		model = p.deepModel
 	}
 
 	messages := []map[string]string{}

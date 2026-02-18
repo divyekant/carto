@@ -18,9 +18,9 @@ func NewAnthropicProvider(c *Client) *AnthropicProvider {
 func (p *AnthropicProvider) Name() string { return "anthropic" }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest) (string, error) {
-	tier := TierHaiku
+	tier := TierFast
 	if req.IsDeepTier {
-		tier = TierOpus
+		tier = TierDeep
 	}
 
 	opts := &CompleteOptions{
