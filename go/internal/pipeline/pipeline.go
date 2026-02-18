@@ -90,14 +90,12 @@ func Run(cfg Config) (*Result, error) {
 		return result, nil
 	}
 
-	// Load/create manifest for incremental support.
-	var mf *manifest.Manifest
-	if cfg.Incremental {
-		mf, err = manifest.Load(cfg.RootPath)
-		if err != nil {
-			log.Printf("pipeline: warning: failed to load manifest, doing full index: %v", err)
-			mf = nil
-		}
+	// Load/create manifest — always track indexed files so subsequent runs
+	// can use --incremental. In non-incremental mode we still save at the end.
+	mf, err := manifest.Load(cfg.RootPath)
+	if err != nil {
+		log.Printf("pipeline: warning: failed to load manifest, starting fresh: %v", err)
+		mf = manifest.NewManifest(cfg.RootPath, cfg.ProjectName)
 	}
 
 	// Build a set of files that need indexing (respecting incremental mode).
@@ -111,7 +109,7 @@ func Run(cfg Config) (*Result, error) {
 
 	for _, mod := range modules {
 		files := mod.Files
-		if mf != nil {
+		if cfg.Incremental && !mf.IsEmpty() {
 			changed, detectErr := mf.DetectChanges(files, scanResult.Root)
 			if detectErr != nil {
 				log.Printf("pipeline: warning: change detection failed for %s: %v", mod.Name, detectErr)

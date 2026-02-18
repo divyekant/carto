@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Tier selects which model class to use.
@@ -17,14 +19,23 @@ const (
 	TierOpus  Tier = "opus"
 )
 
+// OAuth constants matching the WebChat/Claude CLI pattern.
+const (
+	OAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	OAuthTokenURL = "https://console.anthropic.com/v1/oauth/token"
+	OAuthBeta     = "oauth-2025-04-20"
+	ThinkingBeta  = "interleaved-thinking-2025-05-14"
+	UserAgent     = "carto/0.2.0 (external, cli)"
+)
+
 // Options configures the Anthropic API client.
 type Options struct {
-	APIKey       string
-	BaseURL      string
-	HaikuModel   string
-	OpusModel    string
+	APIKey        string
+	BaseURL       string
+	HaikuModel    string
+	OpusModel     string
 	MaxConcurrent int
-	IsOAuth      bool
+	IsOAuth       bool
 }
 
 // CompleteOptions provides per-request overrides.
@@ -33,11 +44,20 @@ type CompleteOptions struct {
 	MaxTokens int
 }
 
+// oauthState tracks a refreshable OAuth token.
+type oauthState struct {
+	mu           sync.Mutex
+	accessToken  string
+	refreshToken string
+	expiresAt    time.Time
+}
+
 // Client is an HTTP-based Anthropic API client.
 type Client struct {
-	opts Options
-	sem  chan struct{}
-	http http.Client
+	opts  Options
+	sem   chan struct{}
+	http  http.Client
+	oauth *oauthState // non-nil when using OAuth tokens
 }
 
 // NewClient creates a Client with sensible defaults.
@@ -56,7 +76,62 @@ func NewClient(opts Options) *Client {
 	}
 
 	sem := make(chan struct{}, opts.MaxConcurrent)
-	return &Client{opts: opts, sem: sem}
+	c := &Client{opts: opts, sem: sem}
+
+	if opts.IsOAuth {
+		c.oauth = &oauthState{
+			accessToken: opts.APIKey,
+		}
+	}
+
+	return c
+}
+
+// refreshOAuthToken exchanges the refresh token for a new access token.
+func (c *Client) refreshOAuthToken() error {
+	if c.oauth == nil || c.oauth.refreshToken == "" {
+		return nil
+	}
+
+	c.oauth.mu.Lock()
+	defer c.oauth.mu.Unlock()
+
+	// Double-check after acquiring lock — another goroutine may have refreshed.
+	if time.Now().Before(c.oauth.expiresAt) {
+		return nil
+	}
+
+	payload := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": c.oauth.refreshToken,
+		"client_id":     OAuthClientID,
+	}
+	body, _ := json.Marshal(payload)
+
+	resp, err := c.http.Post(OAuthTokenURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("llm: oauth refresh request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("llm: oauth refresh failed %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("llm: oauth refresh decode: %w", err)
+	}
+
+	c.oauth.accessToken = result.AccessToken
+	c.oauth.refreshToken = result.RefreshToken
+	c.oauth.expiresAt = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	return nil
 }
 
 // apiRequest is the JSON body sent to /v1/messages.
@@ -117,8 +192,14 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 		return "", fmt.Errorf("llm: marshal request: %w", err)
 	}
 
-	url := strings.TrimRight(c.opts.BaseURL, "/") + "/v1/messages"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
+	endpoint := strings.TrimRight(c.opts.BaseURL, "/") + "/v1/messages"
+
+	// OAuth: add ?beta=true query param (matches WebChat/Claude CLI pattern).
+	if c.opts.IsOAuth {
+		endpoint += "?beta=true"
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("llm: create request: %w", err)
 	}
@@ -127,8 +208,26 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 	req.Header.Set("Anthropic-Version", "2023-06-01")
 
 	if c.opts.IsOAuth {
-		req.Header.Set("Authorization", "Bearer "+c.opts.APIKey)
-		req.Header.Set("Anthropic-Beta", "oauth-2025-04-20,interleaved-thinking-2025-05-14")
+		// Refresh token if expired.
+		if c.oauth != nil && !c.oauth.expiresAt.IsZero() && time.Now().After(c.oauth.expiresAt) {
+			if err := c.refreshOAuthToken(); err != nil {
+				return "", fmt.Errorf("llm: token refresh: %w", err)
+			}
+		}
+
+		// Use current access token.
+		token := c.opts.APIKey
+		if c.oauth != nil {
+			c.oauth.mu.Lock()
+			token = c.oauth.accessToken
+			c.oauth.mu.Unlock()
+		}
+
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Anthropic-Beta", OAuthBeta+","+ThinkingBeta)
+		req.Header.Set("User-Agent", UserAgent)
+		// Remove x-api-key if present (belt-and-suspenders).
+		req.Header.Del("X-Api-Key")
 	} else {
 		req.Header.Set("X-Api-Key", c.opts.APIKey)
 	}

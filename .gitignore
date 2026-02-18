@@ -3,3 +3,5 @@ dist/
 .codex/
 *.tgz
 go/carto
+go/test-data/
+go/.carto/
