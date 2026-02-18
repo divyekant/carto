@@ -70,7 +70,10 @@ type mockMemories struct {
 	mu       sync.Mutex
 	memories []storedMemory
 	nextID   int
+	healthy  bool
 }
+
+func (m *mockMemories) Health() (bool, error) { return m.healthy, nil }
 
 func (m *mockMemories) AddMemory(mem storage.Memory) (int, error) {
 	m.mu.Lock()
@@ -175,7 +178,7 @@ func Add(a, b int) int {
 func TestRun_FullPipeline(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 	registry := signals.NewRegistry()
 	registry.Register(&mockSignalSource{})
 
@@ -296,7 +299,7 @@ func TestRun_FullPipeline(t *testing.T) {
 func TestRun_ModuleFilter(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 
 	result, err := Run(Config{
 		ProjectName:  "test-project",
@@ -332,7 +335,7 @@ func TestRun_ModuleFilter(t *testing.T) {
 func TestRun_IncrementalManifest(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 
 	// First run: full index.
 	result1, err := Run(Config{
@@ -393,7 +396,7 @@ func TestRun_IncrementalManifest(t *testing.T) {
 func TestRun_ProgressPhases(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 
 	var phaseOrder []string
 	var phaseMu sync.Mutex
@@ -441,7 +444,7 @@ func TestRun_ErrorCollection(t *testing.T) {
 	// Add a file that can't be read (simulate by creating a directory with a .go name).
 	// Actually, let's just verify that the pipeline runs and collects errors gracefully.
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 
 	result, err := Run(Config{
 		ProjectName: "test-project",
@@ -463,7 +466,7 @@ func TestRun_ErrorCollection(t *testing.T) {
 func TestRun_NilProgressFn(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
-	mem := &mockMemories{}
+	mem := &mockMemories{healthy: true}
 
 	// Run without a progress callback -- should not panic.
 	result, err := Run(Config{
@@ -501,7 +504,7 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 				ProjectName: "test-project",
 				RootPath:    dir,
 				LLMClient:   &mockLLM{},
-				MemoriesClient: &mockMemories{},
+				MemoriesClient: &mockMemories{healthy: true},
 				MaxWorkers:  2,
 				ProgressFn: func(phase string, done, total int) {
 					opCount.Add(1)
@@ -523,5 +526,23 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 
 	if opCount.Load() < 2 {
 		t.Error("expected progress callbacks from both concurrent runs")
+	}
+}
+
+func TestRun_MemoriesUnhealthy(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: false}
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err == nil {
+		t.Fatal("expected error when Memories is unhealthy")
+	}
+	if !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("expected 'unreachable' in error, got: %v", err)
 	}
 }

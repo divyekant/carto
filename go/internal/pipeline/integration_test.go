@@ -85,7 +85,10 @@ type integrationMemories struct {
 	mu       sync.Mutex
 	memories []storage.Memory
 	nextID   int
+	healthy  bool
 }
+
+func (f *integrationMemories) Health() (bool, error) { return f.healthy, nil }
 
 func (f *integrationMemories) AddMemory(mem storage.Memory) (int, error) {
 	f.mu.Lock()
@@ -262,7 +265,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	mem := &integrationMemories{}
+	mem := &integrationMemories{healthy: true}
 	registry := signals.NewRegistry()
 	registry.Register(&integrationSignalSource{})
 
@@ -429,7 +432,7 @@ func TestIntegration_IncrementalDetectsChanges(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	mem := &integrationMemories{}
+	mem := &integrationMemories{healthy: true}
 
 	// First run: full index with manifest.
 	result1, err := Run(Config{
@@ -496,7 +499,7 @@ func TestIntegration_NoSignalRegistry(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	mem := &integrationMemories{}
+	mem := &integrationMemories{healthy: true}
 
 	result, err := Run(Config{
 		ProjectName:    "no-signals-test",
@@ -545,7 +548,7 @@ func TestIntegration_ConcurrentRuns(t *testing.T) {
 				ProjectName: "concurrent-test",
 				RootPath:    dir,
 				LLMClient:   &integrationLLM{},
-				MemoriesClient: &integrationMemories{},
+				MemoriesClient: &integrationMemories{healthy: true},
 				MaxWorkers:  2,
 				ProgressFn: func(phase string, done, total int) {
 					progressCount.Add(1)

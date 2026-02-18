@@ -63,6 +63,11 @@ func Run(cfg Config) (*Result, error) {
 		cfg.MaxWorkers = 4
 	}
 
+	// Pre-flight: verify Memories server is reachable.
+	if healthy, err := cfg.MemoriesClient.Health(); err != nil || !healthy {
+		return nil, fmt.Errorf("pipeline: memories server unreachable at startup — verify MEMORIES_URL and ensure the server is running")
+	}
+
 	result := &Result{}
 	progress := cfg.ProgressFn
 	if progress == nil {

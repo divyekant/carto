@@ -20,6 +20,8 @@ func newMockMemories() *mockMemories {
 	}
 }
 
+func (m *mockMemories) Health() (bool, error) { return true, nil }
+
 func (m *mockMemories) AddMemory(mem Memory) (int, error) {
 	m.memories = append(m.memories, mem)
 	return len(m.memories), nil
