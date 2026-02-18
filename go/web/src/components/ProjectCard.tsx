@@ -11,7 +11,7 @@ interface ProjectCardProps {
 export function ProjectCard({ name, path, indexedAt, fileCount }: ProjectCardProps) {
   const timeAgo = getTimeAgo(indexedAt)
   return (
-    <Card className="bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition-colors">
+    <Card className="bg-card hover:border-primary/30 transition-colors">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">{name}</CardTitle>
@@ -19,8 +19,8 @@ export function ProjectCard({ name, path, indexedAt, fileCount }: ProjectCardPro
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-xs text-zinc-500 truncate mb-1" title={path}>{path}</p>
-        <p className="text-xs text-zinc-400">Indexed {timeAgo}</p>
+        <p className="text-xs text-muted-foreground truncate mb-1" title={path}>{path}</p>
+        <p className="text-xs text-muted-foreground">Indexed {timeAgo}</p>
       </CardContent>
     </Card>
   )

@@ -112,7 +112,7 @@ export default function IndexRun() {
       <h2 className="text-2xl font-bold mb-6">Index Project</h2>
 
       {state === 'idle' && (
-        <Card className="bg-zinc-900 border-zinc-800 max-w-lg">
+        <Card className="bg-card border-border max-w-lg">
           <CardHeader>
             <CardTitle className="text-base">Start Indexing</CardTitle>
           </CardHeader>
@@ -141,7 +141,7 @@ export default function IndexRun() {
                 id="incremental"
                 checked={incremental}
                 onChange={(e) => setIncremental(e.target.checked)}
-                className="rounded border-zinc-700"
+                className="rounded border-border"
               />
               <Label htmlFor="incremental">Incremental</Label>
             </div>
@@ -153,15 +153,15 @@ export default function IndexRun() {
       )}
 
       {state === 'starting' && (
-        <Card className="bg-zinc-900 border-zinc-800 max-w-lg">
+        <Card className="bg-card border-border max-w-lg">
           <CardContent className="pt-6">
-            <p className="text-zinc-400">Starting indexing...</p>
+            <p className="text-muted-foreground">Starting indexing...</p>
           </CardContent>
         </Card>
       )}
 
       {state === 'running' && (
-        <Card className="bg-zinc-900 border-zinc-800 max-w-lg">
+        <Card className="bg-card border-border max-w-lg">
           <CardHeader>
             <CardTitle className="text-base">Indexing in Progress</CardTitle>
           </CardHeader>
@@ -172,7 +172,7 @@ export default function IndexRun() {
       )}
 
       {state === 'complete' && result && (
-        <Card className="bg-zinc-900 border-zinc-800 max-w-lg">
+        <Card className="bg-card border-border max-w-lg">
           <CardHeader>
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Indexing Complete</CardTitle>
@@ -182,32 +182,32 @@ export default function IndexRun() {
           <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <span className="text-zinc-500">Modules</span>
-                <p className="text-zinc-200 font-medium">{result.modules}</p>
+                <span className="text-muted-foreground">Modules</span>
+                <p className="text-foreground font-medium">{result.modules}</p>
               </div>
               <div>
-                <span className="text-zinc-500">Files</span>
-                <p className="text-zinc-200 font-medium">{result.files}</p>
+                <span className="text-muted-foreground">Files</span>
+                <p className="text-foreground font-medium">{result.files}</p>
               </div>
               <div>
-                <span className="text-zinc-500">Atoms</span>
-                <p className="text-zinc-200 font-medium">{result.atoms}</p>
+                <span className="text-muted-foreground">Atoms</span>
+                <p className="text-foreground font-medium">{result.atoms}</p>
               </div>
               <div>
-                <span className="text-zinc-500">Errors</span>
-                <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'text-zinc-200 font-medium'}>
+                <span className="text-muted-foreground">Errors</span>
+                <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'text-foreground font-medium'}>
                   {result.errors}
                 </p>
               </div>
             </div>
-            <p className="text-xs text-zinc-500">Elapsed: {result.elapsed}</p>
+            <p className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</p>
             <Button variant="secondary" onClick={reset}>Index Another</Button>
           </CardContent>
         </Card>
       )}
 
       {state === 'error' && (
-        <Card className="bg-zinc-900 border-red-900/50 max-w-lg">
+        <Card className="bg-card border-destructive/30 max-w-lg">
           <CardHeader>
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Error</CardTitle>

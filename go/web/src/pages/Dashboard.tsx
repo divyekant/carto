@@ -38,14 +38,14 @@ export default function Dashboard() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold">Dashboard</h2>
-          <p className="text-sm text-zinc-400 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             {projects.length} indexed project{projects.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex items-center gap-3">
           {health && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500">Memories</span>
+              <span className="text-xs text-muted-foreground">Memories</span>
               <Badge variant={health.memories_healthy ? 'default' : 'destructive'} className="text-xs">
                 {health.memories_healthy ? 'Connected' : 'Offline'}
               </Badge>
@@ -56,10 +56,10 @@ export default function Dashboard() {
       </div>
 
       {loading ? (
-        <p className="text-zinc-400">Loading...</p>
+        <p className="text-muted-foreground">Loading...</p>
       ) : projects.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-zinc-400 mb-4">No indexed projects yet.</p>
+          <p className="text-muted-foreground mb-4">No indexed projects yet.</p>
           <Button onClick={() => navigate('/index')}>Index Your First Project</Button>
         </div>
       ) : (

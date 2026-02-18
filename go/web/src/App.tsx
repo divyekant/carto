@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { ThemeProvider } from './components/ThemeProvider'
 import { Layout } from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import IndexRun from './pages/IndexRun'
@@ -7,16 +8,18 @@ import Settings from './pages/Settings'
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/index" element={<IndexRun />} />
-          <Route path="/query" element={<Query />} />
-          <Route path="/settings" element={<Settings />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/index" element={<IndexRun />} />
+            <Route path="/query" element={<Query />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   )
 }
 

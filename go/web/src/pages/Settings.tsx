@@ -75,7 +75,7 @@ export default function Settings() {
     return (
       <div>
         <h2 className="text-2xl font-bold mb-6">Settings</h2>
-        <p className="text-zinc-400">Loading...</p>
+        <p className="text-muted-foreground">Loading...</p>
       </div>
     )
   }
@@ -87,7 +87,7 @@ export default function Settings() {
       <h2 className="text-2xl font-bold mb-6">Settings</h2>
 
       <div className="space-y-6 max-w-lg">
-        <Card className="bg-zinc-900 border-zinc-800">
+        <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-base">LLM Provider</CardTitle>
           </CardHeader>
@@ -147,7 +147,7 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <Card className="bg-zinc-900 border-zinc-800">
+        <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-base">Memories Server</CardTitle>
           </CardHeader>
@@ -190,7 +190,7 @@ export default function Settings() {
             {saving ? 'Saving...' : 'Save Settings'}
           </Button>
           {message && (
-            <span className={message.type === 'success' ? 'text-green-400 text-sm' : 'text-red-400 text-sm'}>
+            <span className={message.type === 'success' ? 'text-emerald-500 text-sm' : 'text-red-400 text-sm'}>
               {message.text}
             </span>
           )}

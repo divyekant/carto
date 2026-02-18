@@ -106,7 +106,7 @@ export default function Query() {
 
           <div className="space-y-2">
             <Label>Tier</Label>
-            <div className="flex rounded-md overflow-hidden border border-zinc-800">
+            <div className="flex rounded-md overflow-hidden border border-border">
               {tiers.map((t) => (
                 <button
                   key={t}
@@ -114,8 +114,8 @@ export default function Query() {
                   className={cn(
                     'px-3 py-1.5 text-sm capitalize transition-colors',
                     tier === t
-                      ? 'bg-zinc-700 text-zinc-100'
-                      : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
                   )}
                 >
                   {t}
@@ -148,7 +148,7 @@ export default function Query() {
           <QueryResult key={r.id || i} index={i + 1} source={r.source} score={r.score} text={r.text} />
         ))}
         {searched && results.length === 0 && (
-          <p className="text-zinc-400 text-sm py-8 text-center">No results found.</p>
+          <p className="text-muted-foreground text-sm py-8 text-center">No results found.</p>
         )}
       </div>
     </div>

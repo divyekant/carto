@@ -11,8 +11,8 @@ export function ProgressBar({ phase, done, total }: ProgressBarProps) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-sm">
-        <span className="text-zinc-300 capitalize">{phase}</span>
-        <span className="text-zinc-400">{done}/{total}</span>
+        <span className="text-foreground capitalize">{phase}</span>
+        <span className="text-muted-foreground">{done}/{total}</span>
       </div>
       <Progress value={percent} className="h-2" />
     </div>
