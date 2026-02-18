@@ -91,6 +91,13 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	result.Modules = len(modules)
+	if cfg.ModuleFilter != "" && len(modules) == 0 {
+		available := make([]string, len(scanResult.Modules))
+		for i, m := range scanResult.Modules {
+			available[i] = m.Name
+		}
+		return nil, fmt.Errorf("pipeline: module %q not found. available: %v", cfg.ModuleFilter, available)
+	}
 	if len(modules) == 0 {
 		return result, nil
 	}
