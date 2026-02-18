@@ -3,9 +3,11 @@ package manifest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -307,5 +309,31 @@ func TestIsEmpty(t *testing.T) {
 
 	if m.IsEmpty() {
 		t.Error("manifest with a file should not be empty")
+	}
+}
+
+func TestManifest_ConcurrentSave(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManifest(dir, "test")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			m.UpdateFile(fmt.Sprintf("file%d.go", idx), "hash"+fmt.Sprint(idx), 100)
+			if err := m.Save(); err != nil {
+				t.Errorf("concurrent save %d failed: %v", idx, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load after concurrent saves: %v", err)
+	}
+	if len(loaded.Files) == 0 {
+		t.Error("expected files after concurrent saves")
 	}
 }
