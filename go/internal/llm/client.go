@@ -88,16 +88,21 @@ func NewClient(opts Options) *Client {
 }
 
 // refreshOAuthToken exchanges the refresh token for a new access token.
+// All checks happen inside the lock to prevent multiple goroutines from
+// triggering redundant refreshes.
 func (c *Client) refreshOAuthToken() error {
-	if c.oauth == nil || c.oauth.refreshToken == "" {
+	if c.oauth == nil {
 		return nil
 	}
 
 	c.oauth.mu.Lock()
 	defer c.oauth.mu.Unlock()
 
-	// Double-check after acquiring lock — another goroutine may have refreshed.
-	if time.Now().Before(c.oauth.expiresAt) {
+	// Token might have been refreshed by another goroutine while we waited.
+	if c.oauth.refreshToken == "" {
+		return nil
+	}
+	if !c.oauth.expiresAt.IsZero() && time.Now().Before(c.oauth.expiresAt) {
 		return nil
 	}
 
@@ -208,11 +213,9 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 	req.Header.Set("Anthropic-Version", "2023-06-01")
 
 	if c.opts.IsOAuth {
-		// Refresh token if expired.
-		if c.oauth != nil && !c.oauth.expiresAt.IsZero() && time.Now().After(c.oauth.expiresAt) {
-			if err := c.refreshOAuthToken(); err != nil {
-				return "", fmt.Errorf("llm: token refresh: %w", err)
-			}
+		// Refresh token if needed (check is inside the lock to avoid races).
+		if err := c.refreshOAuthToken(); err != nil {
+			return "", fmt.Errorf("oauth refresh: %w", err)
 		}
 
 		// Use current access token.
