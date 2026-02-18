@@ -133,6 +133,10 @@ func (c *Client) refreshOAuthToken() error {
 		return fmt.Errorf("llm: oauth refresh decode: %w", err)
 	}
 
+	if result.AccessToken == "" {
+		return fmt.Errorf("llm: oauth refresh returned empty access token")
+	}
+
 	c.oauth.accessToken = result.AccessToken
 	c.oauth.refreshToken = result.RefreshToken
 	c.oauth.expiresAt = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
