@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/anthropic/indexer/internal/config"
 	"github.com/anthropic/indexer/internal/storage"
@@ -11,15 +12,20 @@ import (
 // Server holds the dependencies for the Carto web UI.
 type Server struct {
 	cfg            config.Config
+	cfgMu          sync.RWMutex
 	memoriesClient *storage.MemoriesClient
+	projectsDir    string
+	runs           *RunManager
 	mux            *http.ServeMux
 }
 
 // New creates a new Server with the given config.
-func New(cfg config.Config, memoriesClient *storage.MemoriesClient) *Server {
+func New(cfg config.Config, memoriesClient *storage.MemoriesClient, projectsDir string) *Server {
 	s := &Server{
 		cfg:            cfg,
 		memoriesClient: memoriesClient,
+		projectsDir:    projectsDir,
+		runs:           NewRunManager(),
 		mux:            http.NewServeMux(),
 	}
 	s.routes()

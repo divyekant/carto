@@ -481,16 +481,18 @@ func serveCmd() *cobra.Command {
 		RunE:  runServe,
 	}
 	cmd.Flags().String("port", "8950", "Port to listen on")
+	cmd.Flags().String("projects-dir", "", "Directory containing indexed projects")
 	return cmd
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
 	port, _ := cmd.Flags().GetString("port")
+	projectsDir, _ := cmd.Flags().GetString("projects-dir")
 
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
-	srv := server.New(cfg, memoriesClient)
+	srv := server.New(cfg, memoriesClient, projectsDir)
 	fmt.Printf("%s%sCarto server%s starting on http://localhost:%s\n", bold, cyan, reset, port)
 	return srv.Start(":" + port)
 }
