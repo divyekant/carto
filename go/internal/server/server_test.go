@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/anthropic/indexer/internal/config"
@@ -22,7 +23,7 @@ func TestHealthEndpoint(t *testing.T) {
 	defer memSrv.Close()
 
 	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -45,7 +46,7 @@ func TestHealthEndpoint(t *testing.T) {
 func TestHealthEndpoint_MemoriesDown(t *testing.T) {
 	// Point to unreachable server
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -101,7 +102,7 @@ func TestListProjects(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "noindex"), 0o755)
 
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, tmpDir)
+	srv := New(config.Config{}, memoriesClient, tmpDir, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
 	w := httptest.NewRecorder()
@@ -158,7 +159,7 @@ func TestQueryEndpoint(t *testing.T) {
 	defer memSrv.Close()
 
 	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	body := strings.NewReader(`{"text": "how does auth work?", "k": 5}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
@@ -186,7 +187,7 @@ func TestQueryEndpoint(t *testing.T) {
 
 func TestQueryEndpoint_MissingText(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	body := strings.NewReader(`{"project": "myproj"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
@@ -218,7 +219,7 @@ func TestGetConfig(t *testing.T) {
 		LLMBaseURL:    "",
 	}
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(cfg, memoriesClient, "")
+	srv := New(cfg, memoriesClient, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -267,7 +268,7 @@ func TestPatchConfig(t *testing.T) {
 		MaxConcurrent: 10,
 	}
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(cfg, memoriesClient, "")
+	srv := New(cfg, memoriesClient, "", nil)
 
 	// PATCH to update haiku_model and max_concurrent.
 	patchBody := strings.NewReader(`{"haiku_model": "claude-haiku-4-5-20260101", "max_concurrent": 20}`)
@@ -308,7 +309,7 @@ func TestPatchConfig(t *testing.T) {
 
 func TestStartIndex_Conflict(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	// Manually start a run to simulate an in-progress index.
 	run := srv.runs.Start("myproject")
@@ -339,7 +340,7 @@ func TestStartIndex_Conflict(t *testing.T) {
 
 func TestStartIndex_MissingPath(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	body := strings.NewReader(`{"project": "myproject"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/index", body)
@@ -360,7 +361,7 @@ func TestStartIndex_MissingPath(t *testing.T) {
 
 func TestSSE_NoActiveRun(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
-	srv := New(config.Config{}, memoriesClient, "")
+	srv := New(config.Config{}, memoriesClient, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/nonexistent/progress", nil)
 	w := httptest.NewRecorder()
@@ -421,4 +422,50 @@ func TestRunManager_StartAndFinish(t *testing.T) {
 	// Cleanup.
 	mgr.Finish("project1")
 	mgr.Finish("project2")
+}
+
+func TestSPAFallback(t *testing.T) {
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer memSrv.Close()
+
+	// Create a minimal in-memory FS for testing.
+	testFS := fstest.MapFS{
+		"index.html":          {Data: []byte("<html><body>Carto</body></html>")},
+		"assets/index-abc.js": {Data: []byte("console.log('app')")},
+	}
+
+	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
+	srv := New(config.Config{}, memoriesClient, "", testFS)
+
+	// Root should serve index.html.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Carto") {
+		t.Error("expected index.html content")
+	}
+
+	// Static asset should be served directly.
+	req2 := httptest.NewRequest(http.MethodGet, "/assets/index-abc.js", nil)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for static asset, got %d", w2.Code)
+	}
+
+	// Unknown path should fallback to index.html (SPA routing).
+	req3 := httptest.NewRequest(http.MethodGet, "/query", nil)
+	w3 := httptest.NewRecorder()
+	srv.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SPA route, got %d", w3.Code)
+	}
+	if !strings.Contains(w3.Body.String(), "Carto") {
+		t.Error("SPA fallback should serve index.html")
+	}
 }

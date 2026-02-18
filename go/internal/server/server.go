@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io/fs"
 	"log"
 	"net/http"
 	"sync"
@@ -16,16 +17,20 @@ type Server struct {
 	memoriesClient *storage.MemoriesClient
 	projectsDir    string
 	runs           *RunManager
+	webFS          fs.FS
 	mux            *http.ServeMux
 }
 
-// New creates a new Server with the given config.
-func New(cfg config.Config, memoriesClient *storage.MemoriesClient, projectsDir string) *Server {
+// New creates a new Server with the given config. If webFS is non-nil the
+// server will serve the embedded SPA and fall back to index.html for
+// client-side routes.
+func New(cfg config.Config, memoriesClient *storage.MemoriesClient, projectsDir string, webFS fs.FS) *Server {
 	s := &Server{
 		cfg:            cfg,
 		memoriesClient: memoriesClient,
 		projectsDir:    projectsDir,
 		runs:           NewRunManager(),
+		webFS:          webFS,
 		mux:            http.NewServeMux(),
 	}
 	s.routes()

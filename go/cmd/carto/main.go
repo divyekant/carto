@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/anthropic/indexer/internal/server"
 	"github.com/anthropic/indexer/internal/signals"
 	"github.com/anthropic/indexer/internal/storage"
+	cartoWeb "github.com/anthropic/indexer/web"
 )
 
 var version = "0.2.0"
@@ -492,7 +494,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
-	srv := server.New(cfg, memoriesClient, projectsDir)
+	// Extract the dist subdirectory from the embedded FS.
+	distFS, err := fs.Sub(cartoWeb.DistFS, "dist")
+	if err != nil {
+		return fmt.Errorf("embedded web assets: %w", err)
+	}
+
+	srv := server.New(cfg, memoriesClient, projectsDir, distFS)
 	fmt.Printf("%s%sCarto server%s starting on http://localhost:%s\n", bold, cyan, reset, port)
 	return srv.Start(":" + port)
 }
