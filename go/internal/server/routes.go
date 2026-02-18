@@ -7,6 +7,7 @@ import (
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
+	s.mux.HandleFunc("POST /api/query", s.handleQuery)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

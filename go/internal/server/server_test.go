@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,71 @@ func TestListProjects(t *testing.T) {
 		t.Error("expected projB in results")
 	} else if pb.FileCount != 1 {
 		t.Errorf("projB: expected 1 file, got %d", pb.FileCount)
+	}
+}
+
+func TestQueryEndpoint(t *testing.T) {
+	// Mock memories server that returns search results for POST /search.
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/search" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"results": []map[string]any{
+					{"id": 1, "text": "function handleAuth() {...}", "score": 0.95, "source": "carto/myproj/auth/layer:atoms"},
+					{"id": 2, "text": "JWT token validation", "score": 0.88, "source": "carto/myproj/auth/layer:zones"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer memSrv.Close()
+
+	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
+	srv := New(config.Config{}, memoriesClient, "")
+
+	body := strings.NewReader(`{"text": "how does auth work?", "k": 5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	results, ok := resp["results"].([]any)
+	if !ok {
+		t.Fatalf("expected results array, got %T", resp["results"])
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestQueryEndpoint_MissingText(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "")
+
+	body := strings.NewReader(`{"project": "myproj"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing text, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "text is required" {
+		t.Errorf("expected 'text is required' error, got '%v'", resp["error"])
 	}
 }

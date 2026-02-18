@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthropic/indexer/internal/manifest"
+	"github.com/anthropic/indexer/internal/storage"
 )
 
 // ProjectInfo describes an indexed project discovered in the projects directory.
@@ -73,4 +74,91 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, projects)
+}
+
+// queryRequest is the JSON body for POST /api/query.
+type queryRequest struct {
+	Text    string `json:"text"`
+	Project string `json:"project"`
+	Tier    string `json:"tier"`
+	K       int    `json:"k"`
+}
+
+// queryResultItem is a single result in the query response.
+type queryResultItem struct {
+	Text   string  `json:"text"`
+	Source string  `json:"source"`
+	Score  float64 `json:"score"`
+	Layer  string  `json:"layer,omitempty"`
+}
+
+// handleQuery searches the memories index. If a project is specified, it uses
+// tier-based retrieval and flattens the results. Otherwise it performs a
+// free-form hybrid search across all projects.
+func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	var req queryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.Text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+
+	if req.Tier == "" {
+		req.Tier = "standard"
+	}
+	if req.K == 0 {
+		req.K = 10
+	}
+
+	if req.Project != "" {
+		// Tier-based retrieval for a specific project.
+		store := storage.NewStore(s.memoriesClient, req.Project)
+		tierResults, err := store.RetrieveByTier(req.Text, storage.Tier(req.Tier))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		// Flatten the map of layer results into a single list.
+		var items []queryResultItem
+		for layer, results := range tierResults {
+			for _, sr := range results {
+				items = append(items, queryResultItem{
+					Text:   sr.Text,
+					Source: sr.Source,
+					Score:  sr.Score,
+					Layer:  layer,
+				})
+			}
+		}
+		if items == nil {
+			items = []queryResultItem{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": items})
+		return
+	}
+
+	// Free-form search across all projects.
+	results, err := s.memoriesClient.Search(req.Text, storage.SearchOptions{
+		K:      req.K,
+		Hybrid: true,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	items := make([]queryResultItem, len(results))
+	for i, sr := range results {
+		items[i] = queryResultItem{
+			Text:   sr.Text,
+			Source: sr.Source,
+			Score:  sr.Score,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": items})
 }
