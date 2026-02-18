@@ -1,8 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
+
+	"github.com/divyekant/carto/internal/storage"
 )
 
 func (s *Server) routes() {
@@ -14,6 +17,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/config", s.handlePatchConfig)
 	s.mux.HandleFunc("POST /api/projects/index", s.handleStartIndex)
 	s.mux.HandleFunc("GET /api/projects/{name}/progress", s.handleProgress)
+	s.mux.HandleFunc("POST /api/test-memories", s.handleTestMemories)
 
 	// SPA static files + fallback (only when embedded assets are provided).
 	if s.webFS != nil {
@@ -27,6 +31,35 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":           "ok",
 		"memories_healthy": healthy,
 	})
+}
+
+// handleTestMemories tests connectivity to a Memories server using the
+// URL and API key provided in the request body (not the server's saved config).
+func (s *Server) handleTestMemories(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL    string `json:"url"`
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.URL == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "URL is required"})
+		return
+	}
+
+	client := storage.NewMemoriesClient(req.URL, req.APIKey)
+	healthy, err := client.Health()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"connected": false, "error": err.Error()})
+		return
+	}
+	if !healthy {
+		writeJSON(w, http.StatusOK, map[string]any{"connected": false, "error": "Server returned unhealthy status"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true})
 }
 
 // handleSPA serves static files from the embedded web FS and falls back to
