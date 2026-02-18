@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Provider abstracts an LLM backend (Anthropic, OpenAI, Ollama, etc.).
 type Provider interface {
@@ -18,4 +21,31 @@ type CompletionRequest struct {
 	MaxTokens int
 	// IsDeepTier signals this is an expensive/deep analysis call.
 	IsDeepTier bool
+}
+
+// NewProvider creates the appropriate Provider based on the provider name.
+func NewProvider(name string, opts Options) (Provider, error) {
+	switch name {
+	case "anthropic", "":
+		c := NewClient(opts)
+		return NewAnthropicProvider(c), nil
+	case "openai", "openrouter":
+		baseURL := opts.BaseURL
+		if baseURL == "" {
+			if name == "openrouter" {
+				baseURL = "https://openrouter.ai/api"
+			} else {
+				baseURL = "https://api.openai.com"
+			}
+		}
+		return NewOpenAIProvider(baseURL, opts.APIKey, opts.HaikuModel, opts.OpusModel), nil
+	case "ollama":
+		baseURL := opts.BaseURL
+		if baseURL == "" {
+			baseURL = "http://localhost:11434"
+		}
+		return NewOllamaProvider(baseURL, opts.HaikuModel, opts.OpusModel), nil
+	default:
+		return nil, fmt.Errorf("llm: unknown provider %q (supported: anthropic, openai, openrouter, ollama)", name)
+	}
 }
