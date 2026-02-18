@@ -5,3 +5,5 @@ dist/
 go/carto
 go/test-data/
 go/.carto/
+.ui-val/
+PLAN.md
