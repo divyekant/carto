@@ -7,7 +7,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthropic/indexer/internal/config"
+	"github.com/anthropic/indexer/internal/llm"
 	"github.com/anthropic/indexer/internal/manifest"
+	"github.com/anthropic/indexer/internal/pipeline"
+	"github.com/anthropic/indexer/internal/signals"
 	"github.com/anthropic/indexer/internal/storage"
 )
 
@@ -260,4 +264,131 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 	s.cfgMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// indexRequest is the JSON body for POST /api/projects/index.
+type indexRequest struct {
+	Path        string `json:"path"`
+	Incremental bool   `json:"incremental"`
+	Module      string `json:"module"`
+	Project     string `json:"project"`
+}
+
+// handleStartIndex launches an asynchronous pipeline.Run for the given path.
+// Returns 202 Accepted with the project name, or 409 if already running.
+func (s *Server) handleStartIndex(w http.ResponseWriter, r *http.Request) {
+	var req indexRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	absPath, err := filepath.Abs(req.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	projectName := req.Project
+	if projectName == "" {
+		projectName = filepath.Base(absPath)
+	}
+
+	run := s.runs.Start(projectName)
+	if run == nil {
+		writeError(w, http.StatusConflict, "index already running for project "+projectName)
+		return
+	}
+
+	// Read current config under read lock.
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	go s.runIndex(run, projectName, absPath, req, cfg)
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"project": projectName,
+		"status":  "started",
+	})
+}
+
+// runIndex executes the pipeline in a goroutine and sends progress/result via the IndexRun.
+func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexRequest, cfg config.Config) {
+	defer s.runs.Finish(projectName)
+
+	start := time.Now()
+
+	apiKey := cfg.LLMApiKey
+	if apiKey == "" {
+		apiKey = cfg.AnthropicKey
+	}
+
+	llmClient := llm.NewClient(llm.Options{
+		APIKey:        apiKey,
+		HaikuModel:    cfg.HaikuModel,
+		OpusModel:     cfg.OpusModel,
+		MaxConcurrent: cfg.MaxConcurrent,
+		IsOAuth:       config.IsOAuthToken(apiKey),
+		BaseURL:       cfg.LLMBaseURL,
+	})
+
+	registry := signals.NewRegistry()
+	registry.Register(signals.NewGitSignalSource(absPath))
+
+	result, err := pipeline.Run(pipeline.Config{
+		ProjectName:    projectName,
+		RootPath:       absPath,
+		LLMClient:      llmClient,
+		MemoriesClient: s.memoriesClient,
+		SignalRegistry: registry,
+		MaxWorkers:     cfg.MaxConcurrent,
+		ProgressFn: func(phase string, done, total int) {
+			run.SendProgress(phase, done, total)
+		},
+		Incremental:  req.Incremental,
+		ModuleFilter: req.Module,
+	})
+	if err != nil {
+		run.SendError(err.Error())
+		return
+	}
+
+	elapsed := time.Since(start)
+
+	errMsgs := make([]string, len(result.Errors))
+	for i, e := range result.Errors {
+		errMsgs[i] = e.Error()
+	}
+
+	run.SendResult(IndexResult{
+		Modules: result.Modules,
+		Files:   result.FilesIndexed,
+		Atoms:   result.AtomsCreated,
+		Errors:  len(result.Errors),
+		Elapsed: elapsed,
+		ErrMsgs: errMsgs,
+	})
+}
+
+// handleProgress streams SSE events for an active indexing run.
+func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "project name is required")
+		return
+	}
+
+	run := s.runs.Get(name)
+	if run == nil {
+		writeError(w, http.StatusNotFound, "no active index run for project "+name)
+		return
+	}
+
+	run.WriteSSE(w, r)
 }

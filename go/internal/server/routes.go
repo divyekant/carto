@@ -10,6 +10,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/query", s.handleQuery)
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("PATCH /api/config", s.handlePatchConfig)
+	s.mux.HandleFunc("POST /api/projects/index", s.handleStartIndex)
+	s.mux.HandleFunc("GET /api/projects/{name}/progress", s.handleProgress)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

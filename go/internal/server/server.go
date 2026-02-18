@@ -15,6 +15,7 @@ type Server struct {
 	cfgMu          sync.RWMutex
 	memoriesClient *storage.MemoriesClient
 	projectsDir    string
+	runs           *RunManager
 	mux            *http.ServeMux
 }
 
@@ -24,6 +25,7 @@ func New(cfg config.Config, memoriesClient *storage.MemoriesClient, projectsDir 
 		cfg:            cfg,
 		memoriesClient: memoriesClient,
 		projectsDir:    projectsDir,
+		runs:           NewRunManager(),
 		mux:            http.NewServeMux(),
 	}
 	s.routes()

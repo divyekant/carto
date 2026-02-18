@@ -305,3 +305,120 @@ func TestPatchConfig(t *testing.T) {
 		t.Errorf("memories_url should be unchanged, got %q", resp.MemoriesURL)
 	}
 }
+
+func TestStartIndex_Conflict(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "")
+
+	// Manually start a run to simulate an in-progress index.
+	run := srv.runs.Start("myproject")
+	if run == nil {
+		t.Fatal("expected to start run")
+	}
+
+	// Now try to start another index for the same project via the API.
+	body := strings.NewReader(`{"path": "/tmp/myproject", "project": "myproject"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] == nil || !strings.Contains(resp["error"].(string), "already running") {
+		t.Errorf("expected 'already running' error, got %v", resp["error"])
+	}
+
+	// Clean up: finish the run so it doesn't leak.
+	srv.runs.Finish("myproject")
+}
+
+func TestStartIndex_MissingPath(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "")
+
+	body := strings.NewReader(`{"project": "myproject"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "path is required" {
+		t.Errorf("expected 'path is required' error, got %v", resp["error"])
+	}
+}
+
+func TestSSE_NoActiveRun(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/nonexistent/progress", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] == nil || !strings.Contains(resp["error"].(string), "no active index run") {
+		t.Errorf("expected 'no active index run' error, got %v", resp["error"])
+	}
+}
+
+func TestRunManager_StartAndFinish(t *testing.T) {
+	mgr := NewRunManager()
+
+	// Start a run.
+	run := mgr.Start("project1")
+	if run == nil {
+		t.Fatal("expected to start run")
+	}
+
+	// Should be able to get it.
+	got := mgr.Get("project1")
+	if got != run {
+		t.Error("expected Get to return the started run")
+	}
+
+	// Starting the same project should fail.
+	dup := mgr.Start("project1")
+	if dup != nil {
+		t.Error("expected nil when starting duplicate run")
+	}
+
+	// Different project should succeed.
+	run2 := mgr.Start("project2")
+	if run2 == nil {
+		t.Fatal("expected to start run for different project")
+	}
+
+	// Finish project1.
+	mgr.Finish("project1")
+
+	// Should no longer be found.
+	if mgr.Get("project1") != nil {
+		t.Error("expected nil after finishing run")
+	}
+
+	// Should be able to start project1 again.
+	run3 := mgr.Start("project1")
+	if run3 == nil {
+		t.Error("expected to start run after finishing")
+	}
+
+	// Cleanup.
+	mgr.Finish("project1")
+	mgr.Finish("project2")
+}
