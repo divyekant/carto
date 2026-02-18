@@ -375,6 +375,7 @@ func Run(cfg Config) (*Result, error) {
 				hash, hashErr := mf.ComputeHash(absPath)
 				if hashErr != nil {
 					log.Printf("pipeline: warning: hash failed for %s: %v", relPath, hashErr)
+					result.Errors = append(result.Errors, fmt.Errorf("hash failed for %s: %w", relPath, hashErr))
 					continue
 				}
 				info, statErr := os.Stat(absPath)
