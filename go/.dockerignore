@@ -1,0 +1,21 @@
+# Build artifacts
+carto
+web/node_modules
+web/dist
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+*.sw?
+
+# Test data & local state
+test-data
+.carto
+.ui-val
+
+# Docs (not needed in image)
+docs
+CONTRIBUTING.md
+LICENSE
+README.md
