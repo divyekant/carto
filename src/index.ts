@@ -14,6 +14,7 @@ import { IndexManifest } from './manifest.js';
 import { SkillGenerator } from './skill-generator.js';
 import { LlmClient } from './llm.js';
 import { Pipeline } from './pipeline.js';
+import { isOAuthToken, makeOAuthFetch } from './oauth.js';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -48,7 +49,16 @@ program
       process.exit(1);
     }
 
-    const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+    let anthropic: Anthropic;
+    if (isOAuthToken(config.anthropicApiKey)) {
+      spinner.text = 'Using OAuth token...';
+      anthropic = new Anthropic({
+        apiKey: 'placeholder',
+        fetch: makeOAuthFetch(config.anthropicApiKey),
+      } as any);
+    } else {
+      anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+    }
     const llm = new LlmClient(anthropic, {
       maxConcurrent: config.maxConcurrentLlmCalls,
       haikuModel: config.haikuModel,
@@ -66,9 +76,16 @@ program
 
     const pipeline = new Pipeline({
       scanner, layer1, deep, storage, manifest, skillGenerator, projectPath: absPath,
+      log: (msg) => {
+        if (msg.startsWith('Phase')) {
+          spinner.text = msg;
+        } else {
+          spinner.stop();
+          console.log(chalk.dim(msg));
+          spinner.start();
+        }
+      },
     });
-
-    spinner.text = 'Scanning file tree...';
 
     try {
       const result = await pipeline.runFull();

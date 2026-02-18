@@ -27,18 +27,26 @@ export class CodexStorage {
   async storeLayer1(units: CodeUnit[]): Promise<void> {
     await this.client.deleteBySource(`${this.prefix}/layer:1`);
 
-    const memories = units.map(unit => ({
-      text: this.formatUnit(unit),
-      source: `${this.prefix}/layer:1`,
-      metadata: {
-        layer: 1,
-        unitId: unit.id,
-        path: unit.path,
-        language: unit.language,
-        kind: unit.kind,
-        name: unit.name,
-      },
-    }));
+    const MAX_TEXT = 49000; // FAISS limit is 50k, leave some headroom
+    const memories = units.map(unit => {
+      let text = this.formatUnit(unit);
+      if (text.length > MAX_TEXT) {
+        // Truncate raw code but keep metadata
+        text = text.slice(0, MAX_TEXT) + '\n\n[truncated]';
+      }
+      return {
+        text,
+        source: `${this.prefix}/layer:1`,
+        metadata: {
+          layer: 1,
+          unitId: unit.id,
+          path: unit.path,
+          language: unit.language,
+          kind: unit.kind,
+          name: unit.name,
+        },
+      };
+    });
 
     await this.client.addBatch(memories);
   }

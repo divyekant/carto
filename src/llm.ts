@@ -32,9 +32,16 @@ export class LlmClient {
     await this.acquire();
     try {
       const model = tier === 'haiku' ? this.haikuModel : this.opusModel;
+      const maxTokens = options?.maxTokens ?? 4096;
+
+      // Use streaming for large requests to avoid SDK timeout on long Opus calls
+      if (tier === 'opus' && maxTokens > 8192) {
+        return await this.streamComplete(model, prompt, maxTokens, options?.system);
+      }
+
       const response = await this.client.messages.create({
         model,
-        max_tokens: options?.maxTokens ?? 4096,
+        max_tokens: maxTokens,
         system: options?.system,
         messages: [{ role: 'user', content: prompt }],
       });
@@ -44,6 +51,24 @@ export class LlmClient {
     } finally {
       this.release();
     }
+  }
+
+  private async streamComplete(
+    model: string,
+    prompt: string,
+    maxTokens: number,
+    system?: string,
+  ): Promise<string> {
+    const stream = this.client.messages.stream({
+      model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const response = await stream.finalMessage();
+    const textBlock = response.content.find((b: any) => b.type === 'text');
+    return (textBlock as any)?.text ?? '';
   }
 
   async completeJson<T>(

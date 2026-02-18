@@ -88,7 +88,13 @@ export class FaissClient {
   }
 
   async deleteMemory(id: number): Promise<void> {
-    await this.request(`/memory/${id}`, { method: 'DELETE' });
+    try {
+      await this.request(`/memory/${id}`, { method: 'DELETE' });
+    } catch (err: any) {
+      // Tolerate 404 — entry may already be gone
+      if (err?.message?.includes('404')) return;
+      throw err;
+    }
   }
 
   async deleteBySource(sourcePrefix: string): Promise<number> {

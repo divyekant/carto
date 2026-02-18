@@ -18,6 +18,8 @@ const DEFAULT_IGNORE = [
   '__pycache__', '.pytest_cache', '.mypy_cache', '.tox',
   'target', '.gradle', '.idea', '.vscode', '.DS_Store',
   'vendor', 'coverage', '.next', '.nuxt', '.turbo',
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb',
+  'Gemfile.lock', 'Cargo.lock', 'composer.lock', 'poetry.lock',
 ];
 
 export class Scanner {

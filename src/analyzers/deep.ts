@@ -12,9 +12,23 @@ export class DeepAnalyzer {
   constructor(private llm: LlmClient) {}
 
   async analyze(units: CodeUnit[]): Promise<DeepAnalysisResult> {
-    const unitSummaries = units.map(u =>
+    // Estimate token count (~4 chars per token) to avoid long-context rate limits.
+    // If the full code would exceed ~150k tokens, send summaries only.
+    const fullTexts = units.map(u =>
       `[${u.id}] (${u.kind}, ${u.language})\n  Path: ${u.path}\n  Summary: ${u.summary}\n  Imports: ${u.imports.join(', ') || 'none'}\n  Exports: ${u.exports.join(', ') || 'none'}\n  Code:\n${u.rawCode}`
-    ).join('\n\n---\n\n');
+    );
+    const totalChars = fullTexts.reduce((sum, t) => sum + t.length, 0);
+    const estimatedTokens = Math.ceil(totalChars / 4);
+
+    let unitSummaries: string;
+    if (estimatedTokens > 150_000) {
+      // Use compact summaries without raw code for large codebases
+      unitSummaries = units.map(u =>
+        `[${u.id}] (${u.kind}, ${u.language})\n  Path: ${u.path}\n  Summary: ${u.summary}\n  Imports: ${u.imports.join(', ') || 'none'}\n  Exports: ${u.exports.join(', ') || 'none'}`
+      ).join('\n\n---\n\n');
+    } else {
+      unitSummaries = fullTexts.join('\n\n---\n\n');
+    }
 
     const prompt = `You are an expert software architect performing deep analysis of a codebase. Below are all the code units discovered in the project, each with its summary, imports, exports, and source code.
 
@@ -61,17 +75,74 @@ Respond with ONLY valid JSON, no markdown fences or commentary.`;
 
     const response = await this.llm.complete(prompt, 'opus', {
       system: 'You are an expert software architect. Analyze codebases with precision. Output only valid JSON.',
-      maxTokens: 16384,
+      maxTokens: 32768,
     });
 
     return this.parseResponse(response);
   }
 
-  private parseResponse(response: string): DeepAnalysisResult {
-    const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const jsonStr = jsonMatch ? jsonMatch[1].trim() : response.trim();
+  private repairJson(json: string): string {
+    // Remove trailing comma if present
+    let repaired = json.replace(/,\s*$/, '');
 
-    const parsed = JSON.parse(jsonStr);
+    // Remove any incomplete last element (truncated string/object)
+    // Find last complete element by looking for last complete value before truncation
+    const lastComplete = Math.max(
+      repaired.lastIndexOf('},'),
+      repaired.lastIndexOf('}]'),
+      repaired.lastIndexOf('"]'),
+      repaired.lastIndexOf('"}'),
+    );
+    if (lastComplete > repaired.length * 0.5) {
+      // Only trim if we're past the halfway point (enough data to be useful)
+      repaired = repaired.slice(0, lastComplete + 1);
+    }
+
+    // Count open/close brackets and close any remaining open ones
+    const opens: string[] = [];
+    let inString = false;
+    let escape = false;
+    for (const ch of repaired) {
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{' || ch === '[') opens.push(ch);
+      if (ch === '}' || ch === ']') opens.pop();
+    }
+    // Close any remaining opens in reverse
+    for (let i = opens.length - 1; i >= 0; i--) {
+      repaired += opens[i] === '{' ? '}' : ']';
+    }
+
+    return repaired;
+  }
+
+  private parseResponse(response: string): DeepAnalysisResult {
+    let jsonStr = response.trim();
+
+    // Strip markdown fences if present (greedy to capture all content between first and last fence)
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]+)\n?\s*```$/);
+    if (fenceMatch) {
+      jsonStr = fenceMatch[1].trim();
+    }
+
+    // If it still doesn't start with {, try to find the first { and last }
+    if (!jsonStr.startsWith('{')) {
+      const start = jsonStr.indexOf('{');
+      const end = jsonStr.lastIndexOf('}');
+      if (start !== -1 && end !== -1) {
+        jsonStr = jsonStr.slice(start, end + 1);
+      }
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      // LLM response may be truncated — try to repair by closing open arrays/objects
+      parsed = JSON.parse(this.repairJson(jsonStr));
+    }
 
     return {
       relationships: (parsed.relationships || []).map((r: any) => ({
