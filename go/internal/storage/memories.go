@@ -85,7 +85,8 @@ func (c *MemoriesClient) Health() (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK, nil
 }
 
