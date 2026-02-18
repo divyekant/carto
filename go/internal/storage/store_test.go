@@ -6,49 +6,49 @@ import (
 	"testing"
 )
 
-// mockFaiss implements FaissAPI for testing.
-type mockFaiss struct {
+// mockMemories implements MemoriesAPI for testing.
+type mockMemories struct {
 	memories []Memory
 	batches  [][]Memory
 	results  map[string][]SearchResult // source -> results
 	deleted  []string
 }
 
-func newMockFaiss() *mockFaiss {
-	return &mockFaiss{
+func newMockMemories() *mockMemories {
+	return &mockMemories{
 		results: make(map[string][]SearchResult),
 	}
 }
 
-func (m *mockFaiss) AddMemory(mem Memory) (int, error) {
+func (m *mockMemories) AddMemory(mem Memory) (int, error) {
 	m.memories = append(m.memories, mem)
 	return len(m.memories), nil
 }
 
-func (m *mockFaiss) AddBatch(memories []Memory) error {
+func (m *mockMemories) AddBatch(memories []Memory) error {
 	m.batches = append(m.batches, memories)
 	m.memories = append(m.memories, memories...)
 	return nil
 }
 
-func (m *mockFaiss) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+func (m *mockMemories) Search(query string, opts SearchOptions) ([]SearchResult, error) {
 	return nil, nil
 }
 
-func (m *mockFaiss) ListBySource(source string, limit int) ([]SearchResult, error) {
+func (m *mockMemories) ListBySource(source string, limit int) ([]SearchResult, error) {
 	if results, ok := m.results[source]; ok {
 		return results, nil
 	}
 	return nil, nil
 }
 
-func (m *mockFaiss) DeleteBySource(prefix string) (int, error) {
+func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	m.deleted = append(m.deleted, prefix)
 	return 0, nil
 }
 
 func TestSourceTag(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "myproject")
 
 	tag := s.sourceTag("mymodule", "atoms")
@@ -65,7 +65,7 @@ func TestSourceTag(t *testing.T) {
 }
 
 func TestStoreLayer(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "testproj")
 
 	err := s.StoreLayer("auth", LayerAtoms, "func Login() { ... }")
@@ -88,7 +88,7 @@ func TestStoreLayer(t *testing.T) {
 }
 
 func TestStoreLayer_Truncation(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	// Build content that exceeds 49000 chars with newlines.
@@ -121,7 +121,7 @@ func TestStoreLayer_Truncation(t *testing.T) {
 }
 
 func TestStoreBatch(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	entries := []string{"atom 1", "atom 2", "atom 3"}
@@ -152,7 +152,7 @@ func TestStoreBatch(t *testing.T) {
 }
 
 func TestRetrieveByTier_Mini(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	// Seed results for zones and blueprint.
@@ -190,7 +190,7 @@ func TestRetrieveByTier_Mini(t *testing.T) {
 }
 
 func TestRetrieveByTier_Standard(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	// Seed all layers.
@@ -224,7 +224,7 @@ func TestRetrieveByTier_Standard(t *testing.T) {
 }
 
 func TestRetrieveByTier_Full(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	// Seed all layers.
@@ -252,7 +252,7 @@ func TestRetrieveByTier_Full(t *testing.T) {
 }
 
 func TestClearModule(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "proj")
 
 	err := s.ClearModule("auth")
@@ -274,7 +274,7 @@ func TestClearModule(t *testing.T) {
 }
 
 func TestClearProject(t *testing.T) {
-	mock := newMockFaiss()
+	mock := newMockMemories()
 	s := NewStore(mock, "myproj")
 
 	err := s.ClearProject()

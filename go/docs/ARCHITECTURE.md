@@ -395,10 +395,10 @@ progressively more context:
 
 `Store.RetrieveByTier()` takes a module name and tier, then calls
 `Store.RetrieveLayer()` for each layer in the tier. Each layer retrieval
-uses `FaissClient.ListBySource()` to fetch all entries matching the
+uses `MemoriesClient.ListBySource()` to fetch all entries matching the
 source tag `carto/{project}/{module}/layer:{layer}`.
 
-Free-form queries bypass the tier system and use `FaissClient.Search()`
+Free-form queries bypass the tier system and use `MemoriesClient.Search()`
 with hybrid (BM25 + vector) search across all stored memories.
 
 ---
@@ -550,7 +550,7 @@ mode switching.
 
 ### Memories as External Service
 
-Memories is accessed via a REST API (`storage.FaissClient`) rather than embedded
+Memories is accessed via a REST API (`storage.MemoriesClient`) rather than embedded
 as a library. This:
 - Decouples storage from the indexing process
 - Allows the Memories index to be shared across tools (CLI, IDE plugins, etc.)

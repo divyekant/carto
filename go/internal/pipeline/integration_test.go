@@ -79,15 +79,15 @@ func (m *integrationLLM) getCounts() (total, haiku, opus int) {
 	return m.calls, m.haikuCnt, m.opusCnt
 }
 
-// integrationFaiss is a thread-safe in-memory FAISS mock that stores all
+// integrationMemories is a thread-safe in-memory Memories mock that stores all
 // memories and allows inspection by source prefix.
-type integrationFaiss struct {
+type integrationMemories struct {
 	mu       sync.Mutex
 	memories []storage.Memory
 	nextID   int
 }
 
-func (f *integrationFaiss) AddMemory(mem storage.Memory) (int, error) {
+func (f *integrationMemories) AddMemory(mem storage.Memory) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
@@ -95,7 +95,7 @@ func (f *integrationFaiss) AddMemory(mem storage.Memory) (int, error) {
 	return f.nextID, nil
 }
 
-func (f *integrationFaiss) AddBatch(memories []storage.Memory) error {
+func (f *integrationMemories) AddBatch(memories []storage.Memory) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, mem := range memories {
@@ -105,20 +105,20 @@ func (f *integrationFaiss) AddBatch(memories []storage.Memory) error {
 	return nil
 }
 
-func (f *integrationFaiss) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+func (f *integrationMemories) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
 	return nil, nil
 }
 
-func (f *integrationFaiss) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
+func (f *integrationMemories) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
 	return nil, nil
 }
 
-func (f *integrationFaiss) DeleteBySource(prefix string) (int, error) {
+func (f *integrationMemories) DeleteBySource(prefix string) (int, error) {
 	return 0, nil
 }
 
 // getMemories returns a snapshot of all stored memories.
-func (f *integrationFaiss) getMemories() []storage.Memory {
+func (f *integrationMemories) getMemories() []storage.Memory {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make([]storage.Memory, len(f.memories))
@@ -128,7 +128,7 @@ func (f *integrationFaiss) getMemories() []storage.Memory {
 
 // layersStored extracts unique layer names from the stored memory source tags.
 // Source tags follow the format: carto/{project}/{module}/layer:{layer}
-func (f *integrationFaiss) layersStored() map[string]bool {
+func (f *integrationMemories) layersStored() map[string]bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	layers := make(map[string]bool)
@@ -262,7 +262,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	faiss := &integrationFaiss{}
+	mem := &integrationMemories{}
 	registry := signals.NewRegistry()
 	registry.Register(&integrationSignalSource{})
 
@@ -275,7 +275,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		ProjectName:    "integration-test",
 		RootPath:       dir,
 		LLMClient:      llmClient,
-		FaissClient:    faiss,
+		MemoriesClient: mem,
 		SignalRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true, // enable manifest creation
@@ -338,18 +338,18 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		t.Errorf("Opus calls: got %d, want >= 2 (module analysis + synthesis)", opusCalls)
 	}
 
-	// ── Verify FAISS layers ─────────────────────────────────────────
+	// ── Verify Memories layers ──────────────────────────────────────
 
-	memories := faiss.getMemories()
+	memories := mem.getMemories()
 	if len(memories) == 0 {
-		t.Fatal("no memories stored in FAISS")
+		t.Fatal("no memories stored")
 	}
 
-	layers := faiss.layersStored()
+	layers := mem.layersStored()
 	expectedLayers := []string{"atoms", "history", "signals", "wiring", "zones", "blueprint", "patterns"}
 	for _, layer := range expectedLayers {
 		if !layers[layer] {
-			t.Errorf("layer %q was not stored in FAISS (stored layers: %v)", layer, layers)
+			t.Errorf("layer %q was not stored in Memories (stored layers: %v)", layer, layers)
 		}
 	}
 
@@ -396,7 +396,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		ProjectName:    "integration-test",
 		RootPath:       dir,
 		LLMClient:      llmClient,
-		FaissClient:    faiss,
+		MemoriesClient: mem,
 		SignalRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true,
@@ -429,14 +429,14 @@ func TestIntegration_IncrementalDetectsChanges(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	faiss := &integrationFaiss{}
+	mem := &integrationMemories{}
 
 	// First run: full index with manifest.
 	result1, err := Run(Config{
 		ProjectName: "change-detect-test",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  2,
 		Incremental: true,
 	})
@@ -469,7 +469,7 @@ func Farewell(name string) string {
 		ProjectName: "change-detect-test",
 		RootPath:    dir,
 		LLMClient:   llmClient,
-		FaissClient: faiss,
+		MemoriesClient: mem,
 		MaxWorkers:  2,
 		Incremental: true,
 	})
@@ -496,13 +496,13 @@ func TestIntegration_NoSignalRegistry(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
-	faiss := &integrationFaiss{}
+	mem := &integrationMemories{}
 
 	result, err := Run(Config{
 		ProjectName:    "no-signals-test",
 		RootPath:       dir,
 		LLMClient:      llmClient,
-		FaissClient:    faiss,
+		MemoriesClient: mem,
 		SignalRegistry: nil,
 		MaxWorkers:     2,
 	})
@@ -521,9 +521,9 @@ func TestIntegration_NoSignalRegistry(t *testing.T) {
 	}
 
 	// Signals layer should still be stored (as empty/null JSON).
-	layers := faiss.layersStored()
+	layers := mem.layersStored()
 	if !layers["atoms"] {
-		t.Error("atoms layer missing from FAISS")
+		t.Error("atoms layer missing from Memories")
 	}
 }
 
@@ -545,7 +545,7 @@ func TestIntegration_ConcurrentRuns(t *testing.T) {
 				ProjectName: "concurrent-test",
 				RootPath:    dir,
 				LLMClient:   &integrationLLM{},
-				FaissClient: &integrationFaiss{},
+				MemoriesClient: &integrationMemories{},
 				MaxWorkers:  2,
 				ProgressFn: func(phase string, done, total int) {
 					progressCount.Add(1)

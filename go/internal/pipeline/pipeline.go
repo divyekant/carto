@@ -1,6 +1,6 @@
 // Package pipeline orchestrates the full Carto indexing flow: scan, chunk,
 // analyze atoms, extract history and signals, run deep analysis, and store
-// results in FAISS. It supports incremental indexing via manifest hashes and
+// results in Memories. It supports incremental indexing via manifest hashes and
 // optional module filtering.
 package pipeline
 
@@ -34,7 +34,7 @@ type Config struct {
 	ProjectName    string
 	RootPath       string
 	LLMClient      LLMClient
-	FaissClient    storage.FaissAPI
+	MemoriesClient storage.MemoriesAPI
 	SignalRegistry *signals.Registry
 	MaxWorkers     int
 	ProgressFn     func(phase string, done, total int) // optional progress callback
@@ -57,7 +57,7 @@ type Result struct {
 //  2. Chunk + Atoms — split files into chunks and analyze with Haiku
 //  3. History + Signals — extract git history and external signals
 //  4. Deep Analysis — per-module wiring/zones analysis and system synthesis
-//  5. Store — persist all layers to FAISS and update manifest
+//  5. Store — persist all layers to Memories and update manifest
 func Run(cfg Config) (*Result, error) {
 	if cfg.MaxWorkers <= 0 {
 		cfg.MaxWorkers = 4
@@ -118,9 +118,9 @@ func Run(cfg Config) (*Result, error) {
 				// Only process added and modified files.
 				files = append(changed.Added, changed.Modified...)
 
-				// Clean removed files from FAISS.
+				// Clean removed files from Memories.
 				if len(changed.Removed) > 0 {
-					store := storage.NewStore(cfg.FaissClient, cfg.ProjectName)
+					store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
 					if clearErr := store.ClearModule(mod.Name); clearErr != nil {
 						log.Printf("pipeline: warning: failed to clear module %s: %v", mod.Name, clearErr)
 						result.Errors = append(result.Errors, clearErr)
@@ -301,7 +301,7 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	// ── Phase 5: Store ─────────────────────────────────────────────────
-	store := storage.NewStore(cfg.FaissClient, cfg.ProjectName)
+	store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
 	storeDone := 0
 	// Total store ops: per-module layers (5 each) + system-wide (2).
 	storeTotal := len(work)*5 + 2

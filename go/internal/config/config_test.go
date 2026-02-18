@@ -33,16 +33,6 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_LegacyFallback(t *testing.T) {
-	os.Setenv("FAISS_URL", "http://legacy:8900")
-	defer os.Unsetenv("FAISS_URL")
-
-	cfg := Load()
-	if cfg.MemoriesURL != "http://legacy:8900" {
-		t.Errorf("expected legacy FAISS_URL fallback, got %s", cfg.MemoriesURL)
-	}
-}
-
 func TestIsOAuthToken(t *testing.T) {
 	if !IsOAuthToken("sk-ant-oat01-abc123") {
 		t.Error("should detect OAuth token")

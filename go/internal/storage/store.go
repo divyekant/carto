@@ -2,7 +2,7 @@ package storage
 
 import "fmt"
 
-// Layer constants for tagging in FAISS.
+// Layer constants for tagging in Memories.
 const (
 	LayerAtoms     = "atoms"     // Layer 1a
 	LayerHistory   = "history"   // Layer 1b
@@ -31,7 +31,7 @@ var tierLayers = map[Tier][]string{
 	TierFull:     {LayerZones, LayerBlueprint, LayerAtoms, LayerWiring, LayerHistory, LayerSignals},
 }
 
-// maxContentLen is the FAISS content limit (50k) with a safety margin.
+// maxContentLen is the Memories content limit (50k) with a safety margin.
 const maxContentLen = 49000
 
 // Tier controls how much context to retrieve.
@@ -43,9 +43,9 @@ const (
 	TierFull     Tier = "full"     // + clarified code + history + signals (~500KB)
 )
 
-// FaissAPI is the interface Store uses from FaissClient.
+// MemoriesAPI is the interface Store uses from MemoriesClient.
 // This enables testing with mocks instead of requiring a real HTTP server.
-type FaissAPI interface {
+type MemoriesAPI interface {
 	AddMemory(m Memory) (int, error)
 	AddBatch(memories []Memory) error
 	Search(query string, opts SearchOptions) ([]SearchResult, error)
@@ -53,28 +53,28 @@ type FaissAPI interface {
 	DeleteBySource(prefix string) (int, error)
 }
 
-// Store provides domain-specific FAISS storage for carto layers.
+// Store provides domain-specific Memories storage for carto layers.
 type Store struct {
-	faiss   FaissAPI
-	project string
+	memories MemoriesAPI
+	project  string
 }
 
 // NewStore creates a Store scoped to a project name.
-func NewStore(faiss FaissAPI, project string) *Store {
-	return &Store{faiss: faiss, project: project}
+func NewStore(memories MemoriesAPI, project string) *Store {
+	return &Store{memories: memories, project: project}
 }
 
-// sourceTag returns the FAISS source tag for a module and layer.
+// sourceTag returns the Memories source tag for a module and layer.
 // Format: carto/{project}/{module}/layer:{layer}
 func (s *Store) sourceTag(module, layer string) string {
 	return fmt.Sprintf("carto/%s/%s/layer:%s", s.project, module, layer)
 }
 
-// StoreLayer stores content in FAISS with the appropriate source tag.
+// StoreLayer stores content in Memories with the appropriate source tag.
 // Content exceeding 49000 chars is truncated at the last newline boundary.
 func (s *Store) StoreLayer(module, layer, content string) error {
 	content = truncate(content, maxContentLen)
-	_, err := s.faiss.AddMemory(Memory{
+	_, err := s.memories.AddMemory(Memory{
 		Text:   content,
 		Source: s.sourceTag(module, layer),
 	})
@@ -92,7 +92,7 @@ func (s *Store) StoreBatch(module, layer string, entries []string) error {
 			Source: tag,
 		}
 	}
-	return s.faiss.AddBatch(memories)
+	return s.memories.AddBatch(memories)
 }
 
 // RetrieveByTier retrieves context at the requested tier level.
@@ -120,14 +120,14 @@ func (s *Store) RetrieveByTier(module string, tier Tier) (map[string][]SearchRes
 
 // RetrieveLayer retrieves all entries for a specific layer using ListBySource.
 func (s *Store) RetrieveLayer(module, layer string) ([]SearchResult, error) {
-	return s.faiss.ListBySource(s.sourceTag(module, layer), 0)
+	return s.memories.ListBySource(s.sourceTag(module, layer), 0)
 }
 
 // ClearModule deletes all entries for a module across all layers.
 func (s *Store) ClearModule(module string) error {
 	for _, layer := range allLayers {
 		tag := s.sourceTag(module, layer)
-		if _, err := s.faiss.DeleteBySource(tag); err != nil {
+		if _, err := s.memories.DeleteBySource(tag); err != nil {
 			return fmt.Errorf("clear layer %s: %w", layer, err)
 		}
 	}
@@ -137,7 +137,7 @@ func (s *Store) ClearModule(module string) error {
 // ClearProject deletes all entries for the entire project.
 func (s *Store) ClearProject() error {
 	prefix := fmt.Sprintf("carto/%s/", s.project)
-	_, err := s.faiss.DeleteBySource(prefix)
+	_, err := s.memories.DeleteBySource(prefix)
 	return err
 }
 

@@ -17,8 +17,8 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		MemoriesURL:   envOrFallback("MEMORIES_URL", "FAISS_URL", "http://localhost:8900"),
-		MemoriesKey:   envOrFallback("MEMORIES_API_KEY", "FAISS_API_KEY", "god-is-an-astronaut"),
+		MemoriesURL:   envOr("MEMORIES_URL", "http://localhost:8900"),
+		MemoriesKey:   envOr("MEMORIES_API_KEY", "god-is-an-astronaut"),
 		AnthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		HaikuModel:    envOr("CARTO_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
 		OpusModel:     envOr("CARTO_OPUS_MODEL", "claude-opus-4-6"),
@@ -32,17 +32,6 @@ func IsOAuthToken(key string) bool {
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// envOrFallback tries the primary key, then the legacy key, then the default.
-func envOrFallback(primary, legacy, fallback string) string {
-	if v := os.Getenv(primary); v != "" {
-		return v
-	}
-	if v := os.Getenv(legacy); v != "" {
 		return v
 	}
 	return fallback
