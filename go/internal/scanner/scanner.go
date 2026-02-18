@@ -47,6 +47,43 @@ var lockFiles = map[string]bool{
 	"composer.lock":     true,
 }
 
+// binaryExtensions is a set of file extensions that are always considered binary.
+var binaryExtensions = map[string]bool{
+	".pyc": true, ".pyo": true, ".o": true, ".so": true, ".dylib": true,
+	".dll": true, ".exe": true, ".wasm": true, ".class": true, ".jar": true,
+	".war": true, ".onnx": true, ".bin": true, ".dat": true, ".db": true,
+	".sqlite": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".bmp": true, ".ico": true, ".webp": true, ".svg": true, ".pdf": true,
+	".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".ppt": true,
+	".pptx": true, ".zip": true, ".tar": true, ".gz": true, ".bz2": true,
+	".7z": true, ".rar": true, ".mp3": true, ".mp4": true, ".avi": true,
+	".mov": true, ".wav": true, ".ttf": true, ".woff": true, ".woff2": true,
+	".eot": true,
+}
+
+// isBinary returns true if the file should be skipped during scanning.
+// It checks the extension first (fast path), then falls back to magic byte
+// detection by looking for null bytes in the first 512 bytes.
+func isBinary(name string, content []byte) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	if binaryExtensions[ext] {
+		return true
+	}
+	if len(content) == 0 {
+		return false
+	}
+	check := content
+	if len(check) > 512 {
+		check = check[:512]
+	}
+	for _, b := range check {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Scan walks the file tree at rootPath and returns all source files and
 // detected modules. It respects .gitignore patterns and skips common
 // non-code directories and lock files.
@@ -93,6 +130,11 @@ func Scan(rootPath string) (*ScanResult, error) {
 
 		// Skip lock files
 		if lockFiles[name] {
+			return nil
+		}
+
+		// Skip binary files
+		if isBinary(name, nil) {
 			return nil
 		}
 
