@@ -254,12 +254,7 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Rebuild the Memories client so queries use the updated credentials.
-	memoriesURL := s.cfg.MemoriesURL
-	if isDocker() {
-		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
-		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
-	}
-	s.memoriesClient = storage.NewMemoriesClient(memoriesURL, s.cfg.MemoriesKey)
+	s.memoriesClient = storage.NewMemoriesClient(config.ResolveURL(s.cfg.MemoriesURL), s.cfg.MemoriesKey)
 
 	// Persist config so settings survive container restarts.
 	cfgSnapshot := s.cfg
@@ -350,12 +345,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 
 	// Create a fresh Memories client from the current config so Settings
 	// changes take effect without server restart.
-	memoriesURL := cfg.MemoriesURL
-	if isDocker() {
-		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
-		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
-	}
-	memoriesClient := storage.NewMemoriesClient(memoriesURL, cfg.MemoriesKey)
+	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	result, err := pipeline.Run(pipeline.Config{
 		ProjectName:    projectName,

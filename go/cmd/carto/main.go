@@ -499,14 +499,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	cfg := config.Load()
 
-	// When running inside Docker, rewrite localhost URLs so the server
-	// can reach services on the host machine.
-	memoriesURL := cfg.MemoriesURL
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
-		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
-	}
-	memoriesClient := storage.NewMemoriesClient(memoriesURL, cfg.MemoriesKey)
+	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	// Extract the dist subdirectory from the embedded FS.
 	distFS, err := fs.Sub(cartoWeb.DistFS, "dist")
