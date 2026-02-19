@@ -16,9 +16,22 @@ interface HealthStatus {
   memories_healthy: boolean
 }
 
+interface RunStatus {
+  project: string
+  status: string
+  result?: {
+    modules: number
+    files: number
+    atoms: number
+    errors: number
+  }
+  error?: string
+}
+
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [health, setHealth] = useState<HealthStatus | null>(null)
+  const [runStatuses, setRunStatuses] = useState<Record<string, RunStatus>>({})
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
@@ -26,9 +39,15 @@ export default function Dashboard() {
     Promise.all([
       fetch('/api/projects').then(r => r.json()),
       fetch('/api/health').then(r => r.json()),
-    ]).then(([projData, healthData]) => {
+      fetch('/api/projects/runs').then(r => r.json()).catch(() => []),
+    ]).then(([projData, healthData, runsData]) => {
       setProjects(projData.projects || [])
       setHealth(healthData)
+      const runMap: Record<string, RunStatus> = {}
+      for (const run of (runsData as RunStatus[])) {
+        runMap[run.project] = run
+      }
+      setRunStatuses(runMap)
     }).catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -65,7 +84,15 @@ export default function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p) => (
-            <ProjectCard key={p.name} name={p.name} path={p.path} indexedAt={p.indexed_at} fileCount={p.file_count} />
+            <ProjectCard
+              key={p.name}
+              name={p.name}
+              path={p.path}
+              indexedAt={p.indexed_at}
+              fileCount={p.file_count}
+              runStatus={runStatuses[p.name]}
+              onReindex={() => navigate(`/index?path=${encodeURIComponent(p.path)}`)}
+            />
           ))}
         </div>
       )}
