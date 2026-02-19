@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -74,4 +75,126 @@ func (m *mockSource) Fetch(ctx context.Context, req FetchRequest) ([]Artifact, e
 func TestSourceInterface_Compliance(t *testing.T) {
 	// Verify mockSource satisfies Source at compile time.
 	var _ Source = (*mockSource)(nil)
+}
+
+// ── Registry Tests ──────────────────────────────────────────────────────
+
+func TestRegistry_FetchAll_ProjectScope(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.Register(&mockSource{
+		name:  "github",
+		scope: ProjectScope,
+		artifacts: []Artifact{
+			{Source: "github", Category: Signal, ID: "#1", Title: "Issue 1"},
+			{Source: "github", Category: Signal, ID: "#2", Title: "PR 2"},
+		},
+	})
+	reg.Register(&mockSource{
+		name:  "jira",
+		scope: ProjectScope,
+		artifacts: []Artifact{
+			{Source: "jira", Category: Signal, ID: "PROJ-10", Title: "Ticket"},
+		},
+	})
+
+	req := FetchRequest{Project: "test", RepoRoot: "/tmp/repo"}
+	all, err := reg.FetchAllProject(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FetchAllProject: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("expected 3 artifacts, got %d", len(all))
+	}
+}
+
+func TestRegistry_FetchAll_SkipsErrors(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockSource{
+		name:      "good",
+		scope:     ProjectScope,
+		artifacts: []Artifact{{Source: "good", ID: "1", Title: "OK"}},
+	})
+	reg.Register(&mockSource{
+		name:     "bad",
+		scope:    ProjectScope,
+		fetchErr: fmt.Errorf("connection refused"),
+	})
+	reg.Register(&mockSource{
+		name:      "also-good",
+		scope:     ProjectScope,
+		artifacts: []Artifact{{Source: "also-good", ID: "2", Title: "OK too"}},
+	})
+
+	req := FetchRequest{Project: "test", RepoRoot: "/tmp/repo"}
+	all, err := reg.FetchAllProject(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FetchAllProject: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("expected 2 artifacts (skipping failed source), got %d", len(all))
+	}
+}
+
+func TestRegistry_FetchModule(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockSource{
+		name:  "git",
+		scope: ModuleScope,
+		artifacts: []Artifact{
+			{Source: "git", Category: Signal, ID: "abc123", Title: "commit"},
+		},
+	})
+	// Project-scoped sources should be ignored by FetchModule.
+	reg.Register(&mockSource{
+		name:  "jira",
+		scope: ProjectScope,
+		artifacts: []Artifact{
+			{Source: "jira", Category: Signal, ID: "J-1", Title: "ticket"},
+		},
+	})
+
+	req := FetchRequest{Project: "test", Module: "mymod", ModulePath: "/tmp/repo/mymod", RepoRoot: "/tmp/repo"}
+	all, err := reg.FetchModule(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FetchModule: %v", err)
+	}
+	if len(all) != 1 {
+		t.Errorf("expected 1 artifact (module-scoped only), got %d", len(all))
+	}
+	if all[0].Source != "git" {
+		t.Errorf("expected git artifact, got %s", all[0].Source)
+	}
+}
+
+func TestRegistry_Empty(t *testing.T) {
+	reg := NewRegistry()
+	req := FetchRequest{Project: "test", RepoRoot: "/tmp/repo"}
+
+	project, err := reg.FetchAllProject(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FetchAllProject on empty: %v", err)
+	}
+	if len(project) != 0 {
+		t.Errorf("expected 0 from empty registry, got %d", len(project))
+	}
+
+	module, err := reg.FetchModule(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FetchModule on empty: %v", err)
+	}
+	if len(module) != 0 {
+		t.Errorf("expected 0 from empty registry, got %d", len(module))
+	}
+}
+
+func TestRegistry_Sources(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&mockSource{name: "git", scope: ModuleScope})
+	reg.Register(&mockSource{name: "github", scope: ProjectScope})
+
+	names := reg.SourceNames()
+	if len(names) != 2 {
+		t.Fatalf("expected 2 sources, got %d", len(names))
+	}
 }
