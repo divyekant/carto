@@ -425,6 +425,48 @@ func TestRunManager_StartAndFinish(t *testing.T) {
 	mgr.Finish("project2")
 }
 
+func TestRunManager_LastRunPersists(t *testing.T) {
+	mgr := NewRunManager()
+
+	run := mgr.Start("persist-test")
+	if run == nil {
+		t.Fatal("expected to start run")
+	}
+
+	run.SendResult(IndexResult{Modules: 1, Files: 5, Atoms: 20})
+	mgr.Finish("persist-test")
+
+	runs := mgr.ListRuns()
+	found := false
+	for _, r := range runs {
+		if r.Project == "persist-test" && r.Status == "complete" {
+			found = true
+			if r.Result == nil || r.Result.Modules != 1 {
+				t.Errorf("expected result with 1 module, got %+v", r.Result)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected persist-test in ListRuns after finish")
+	}
+
+	// Simulate the 30s cleanup removing the active run
+	mgr.mu.Lock()
+	delete(mgr.runs, "persist-test")
+	mgr.mu.Unlock()
+
+	runs2 := mgr.ListRuns()
+	found2 := false
+	for _, r := range runs2 {
+		if r.Project == "persist-test" {
+			found2 = true
+		}
+	}
+	if !found2 {
+		t.Error("expected persist-test in ListRuns even after active run deleted")
+	}
+}
+
 func TestRunIndex_UsesCurrentConfig(t *testing.T) {
 	cfg := config.Config{
 		MemoriesURL: "http://original:8900",

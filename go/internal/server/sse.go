@@ -165,14 +165,16 @@ func (r *IndexRun) WriteSSE(w http.ResponseWriter, req *http.Request) {
 
 // RunManager tracks active indexing runs by project name.
 type RunManager struct {
-	mu   sync.Mutex
-	runs map[string]*IndexRun
+	mu       sync.Mutex
+	runs     map[string]*IndexRun
+	lastRuns map[string]RunStatus
 }
 
 // NewRunManager creates an empty RunManager.
 func NewRunManager() *RunManager {
 	return &RunManager{
-		runs: make(map[string]*IndexRun),
+		runs:     make(map[string]*IndexRun),
+		lastRuns: make(map[string]RunStatus),
 	}
 }
 
@@ -211,6 +213,20 @@ func (m *RunManager) Finish(project string) {
 	}
 	run.mu.Lock()
 	run.finished = true
+
+	// Snapshot for persistent last-run tracking.
+	status := RunStatus{Project: project}
+	if run.FinalError != "" {
+		status.Status = "error"
+		status.Error = run.FinalError
+	} else if run.FinalResult != nil {
+		status.Status = "complete"
+		status.Result = run.FinalResult
+	} else {
+		status.Status = "complete"
+	}
+	m.lastRuns[project] = status
+
 	run.mu.Unlock()
 	close(run.done)
 	close(run.events)
@@ -245,7 +261,9 @@ func (m *RunManager) ListRuns() []RunStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	seen := make(map[string]bool)
 	var runs []RunStatus
+
 	for name, run := range m.runs {
 		run.mu.Lock()
 		status := RunStatus{Project: name}
@@ -262,6 +280,14 @@ func (m *RunManager) ListRuns() []RunStatus {
 		}
 		run.mu.Unlock()
 		runs = append(runs, status)
+		seen[name] = true
 	}
+
+	for name, status := range m.lastRuns {
+		if !seen[name] {
+			runs = append(runs, status)
+		}
+	}
+
 	return runs
 }
