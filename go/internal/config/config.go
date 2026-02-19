@@ -122,6 +122,27 @@ func mergeConfig(cfg *Config, p persistedConfig) {
 	}
 }
 
+// IsDocker returns true when running inside a Docker container.
+func IsDocker() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
+
+// ResolveURL rewrites localhost/127.0.0.1 URLs to host.docker.internal
+// when running inside Docker. Remote URLs pass through unchanged.
+func ResolveURL(rawURL string) string {
+	return resolveURLForDocker(rawURL, IsDocker())
+}
+
+func resolveURLForDocker(rawURL string, inDocker bool) string {
+	if !inDocker {
+		return rawURL
+	}
+	u := strings.Replace(rawURL, "localhost", "host.docker.internal", 1)
+	u = strings.Replace(u, "127.0.0.1", "host.docker.internal", 1)
+	return u
+}
+
 func IsOAuthToken(key string) bool {
 	return len(key) > 0 && strings.HasPrefix(key, "sk-ant-oat01-")
 }

@@ -33,6 +33,39 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	}
 }
 
+func TestResolveURL_NonDocker(t *testing.T) {
+	url := ResolveURL("http://localhost:8900")
+	if url != "http://localhost:8900" {
+		t.Errorf("expected localhost unchanged, got %s", url)
+	}
+}
+
+func TestResolveURL_Docker(t *testing.T) {
+	tests := []struct {
+		input    string
+		inDocker bool
+		expected string
+	}{
+		{"http://localhost:8900", false, "http://localhost:8900"},
+		{"http://127.0.0.1:8900", false, "http://127.0.0.1:8900"},
+		{"http://localhost:8900", true, "http://host.docker.internal:8900"},
+		{"http://127.0.0.1:8900", true, "http://host.docker.internal:8900"},
+		{"https://memories.example.com", true, "https://memories.example.com"},
+		{"https://memories.example.com", false, "https://memories.example.com"},
+	}
+	for _, tt := range tests {
+		got := resolveURLForDocker(tt.input, tt.inDocker)
+		if got != tt.expected {
+			t.Errorf("resolveURLForDocker(%q, %v) = %q, want %q", tt.input, tt.inDocker, got, tt.expected)
+		}
+	}
+}
+
+func TestIsDocker(t *testing.T) {
+	result := IsDocker()
+	_ = result
+}
+
 func TestIsOAuthToken(t *testing.T) {
 	if !IsOAuthToken("sk-ant-oat01-abc123") {
 		t.Error("should detect OAuth token")
