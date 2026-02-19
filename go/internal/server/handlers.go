@@ -410,3 +410,76 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, runs)
 }
+
+// browseResponse is the JSON shape for GET /api/browse.
+type browseResponse struct {
+	Current     string       `json:"current"`
+	Parent      string       `json:"parent"`
+	Directories []browseItem `json:"directories"`
+}
+
+type browseItem struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// handleBrowse returns subdirectories at a given path for the folder picker.
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	requestedPath := r.URL.Query().Get("path")
+
+	if requestedPath == "" {
+		if s.projectsDir != "" {
+			requestedPath = s.projectsDir
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "cannot determine home directory")
+				return
+			}
+			requestedPath = home
+		}
+	}
+
+	absPath, err := filepath.Abs(requestedPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	// Security: in Docker, restrict to projects directory.
+	if config.IsDocker() && s.projectsDir != "" {
+		if !strings.HasPrefix(absPath, s.projectsDir) {
+			writeError(w, http.StatusForbidden, "path outside allowed directory")
+			return
+		}
+	}
+
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "cannot read directory: "+err.Error())
+		return
+	}
+
+	var dirs []browseItem
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, browseItem{
+			Name: entry.Name(),
+			Path: filepath.Join(absPath, entry.Name()),
+		})
+	}
+	if dirs == nil {
+		dirs = []browseItem{}
+	}
+
+	writeJSON(w, http.StatusOK, browseResponse{
+		Current:     absPath,
+		Parent:      filepath.Dir(absPath),
+		Directories: dirs,
+	})
+}
