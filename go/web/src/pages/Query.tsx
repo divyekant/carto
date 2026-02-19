@@ -42,7 +42,7 @@ export default function Query() {
     fetch('/api/projects')
       .then(r => r.json())
       .then(data => {
-        const projs = (data.projects || []) as Project[]
+        const projs = (Array.isArray(data) ? data : data.projects || []) as Project[]
         setProjects(projs)
         if (projs.length > 0) setProject(projs[0].name)
       })

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -119,51 +120,41 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		req.K = 10
 	}
 
-	if req.Project != "" {
-		// Tier-based retrieval for a specific project.
-		store := storage.NewStore(s.memoriesClient, req.Project)
-		tierResults, err := store.RetrieveByTier(req.Text, storage.Tier(req.Tier))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		// Flatten the map of layer results into a single list.
-		var items []queryResultItem
-		for layer, results := range tierResults {
-			for _, sr := range results {
-				items = append(items, queryResultItem{
-					Text:   sr.Text,
-					Source: sr.Source,
-					Score:  sr.Score,
-					Layer:  layer,
-				})
-			}
-		}
-		if items == nil {
-			items = []queryResultItem{}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"results": items})
-		return
-	}
-
-	// Free-form search across all projects.
-	results, err := s.memoriesClient.Search(req.Text, storage.SearchOptions{
+	// Search with optional project scoping via source prefix.
+	sourcePrefix := ""
+	opts := storage.SearchOptions{
 		K:      req.K,
 		Hybrid: true,
-	})
+	}
+	if req.Project != "" {
+		sourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
+		opts.Source = sourcePrefix
+		// Request extra results so we have enough after filtering.
+		opts.K = req.K * 3
+	}
+
+	results, err := s.memoriesClient.Search(req.Text, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	items := make([]queryResultItem, len(results))
-	for i, sr := range results {
-		items[i] = queryResultItem{
+	var items []queryResultItem
+	for _, sr := range results {
+		if sourcePrefix != "" && !strings.HasPrefix(sr.Source, sourcePrefix) {
+			continue
+		}
+		items = append(items, queryResultItem{
 			Text:   sr.Text,
 			Source: sr.Source,
 			Score:  sr.Score,
+		})
+		if len(items) >= req.K {
+			break
 		}
+	}
+	if items == nil {
+		items = []queryResultItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": items})
 }
@@ -262,7 +253,22 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Rebuild the Memories client so queries use the updated credentials.
+	memoriesURL := s.cfg.MemoriesURL
+	if isDocker() {
+		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
+		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
+	}
+	s.memoriesClient = storage.NewMemoriesClient(memoriesURL, s.cfg.MemoriesKey)
+
+	// Persist config so settings survive container restarts.
+	cfgSnapshot := s.cfg
 	s.cfgMu.Unlock()
+
+	if err := config.Save(cfgSnapshot); err != nil {
+		writeError(w, http.StatusInternalServerError, "settings updated but failed to persist: "+err.Error())
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }

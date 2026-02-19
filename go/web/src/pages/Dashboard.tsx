@@ -41,7 +41,7 @@ export default function Dashboard() {
       fetch('/api/health').then(r => r.json()),
       fetch('/api/projects/runs').then(r => r.json()).catch(() => []),
     ]).then(([projData, healthData, runsData]) => {
-      setProjects(projData.projects || [])
+      setProjects(Array.isArray(projData) ? projData : projData.projects || [])
       setHealth(healthData)
       const runMap: Record<string, RunStatus> = {}
       for (const run of (runsData as RunStatus[])) {

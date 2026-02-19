@@ -488,11 +488,25 @@ func serveCmd() *cobra.Command {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	cfg := config.Load()
 	port, _ := cmd.Flags().GetString("port")
 	projectsDir, _ := cmd.Flags().GetString("projects-dir")
 
-	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
+	// Set config persistence path inside the projects directory so it
+	// survives container restarts (the projects dir is a mounted volume).
+	if projectsDir != "" {
+		config.ConfigPath = filepath.Join(projectsDir, ".carto-server.json")
+	}
+
+	cfg := config.Load()
+
+	// When running inside Docker, rewrite localhost URLs so the server
+	// can reach services on the host machine.
+	memoriesURL := cfg.MemoriesURL
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
+		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
+	}
+	memoriesClient := storage.NewMemoriesClient(memoriesURL, cfg.MemoriesKey)
 
 	// Extract the dist subdirectory from the embedded FS.
 	distFS, err := fs.Sub(cartoWeb.DistFS, "dist")

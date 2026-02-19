@@ -153,11 +153,13 @@ func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResul
 		K         int     `json:"k"`
 		Threshold float64 `json:"threshold,omitempty"`
 		Hybrid    bool    `json:"hybrid"`
+		Source    string  `json:"source,omitempty"`
 	}{
 		Query:     query,
 		K:         k,
 		Threshold: opts.Threshold,
 		Hybrid:    opts.Hybrid,
+		Source:    opts.Source,
 	}
 
 	resp, err := c.request(http.MethodPost, "/search", payload)
