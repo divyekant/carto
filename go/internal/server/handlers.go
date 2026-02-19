@@ -11,6 +11,7 @@ import (
 
 	"github.com/divyekant/carto/internal/config"
 	"github.com/divyekant/carto/internal/gitclone"
+	"github.com/divyekant/carto/internal/knowledge"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/pipeline"
@@ -394,17 +395,28 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		registry.Register(ghSrc)
 	}
 
+	// Set up knowledge sources if a docs/ directory exists in the project.
+	var knowledgeReg *knowledge.Registry
+	docsDir := filepath.Join(absPath, "docs")
+	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
+		knowledgeReg = knowledge.NewRegistry()
+		pdfSrc := knowledge.NewLocalPDFSource()
+		pdfSrc.Configure(map[string]string{"dir": docsDir})
+		knowledgeReg.Register(pdfSrc)
+	}
+
 	// Create a fresh Memories client from the current config so Settings
 	// changes take effect without server restart.
 	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	result, err := pipeline.Run(pipeline.Config{
-		ProjectName:    projectName,
-		RootPath:       absPath,
-		LLMClient:      llmClient,
-		MemoriesClient: memoriesClient,
-		SignalRegistry: registry,
-		MaxWorkers:     cfg.MaxConcurrent,
+		ProjectName:       projectName,
+		RootPath:          absPath,
+		LLMClient:         llmClient,
+		MemoriesClient:    memoriesClient,
+		SignalRegistry:    registry,
+		KnowledgeRegistry: knowledgeReg,
+		MaxWorkers:        cfg.MaxConcurrent,
 		ProgressFn: func(phase string, done, total int) {
 			run.SendProgress(phase, done, total)
 		},

@@ -16,6 +16,7 @@ import (
 	"github.com/divyekant/carto/internal/atoms"
 	"github.com/divyekant/carto/internal/chunker"
 	"github.com/divyekant/carto/internal/history"
+	"github.com/divyekant/carto/internal/knowledge"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/scanner"
@@ -35,8 +36,9 @@ type Config struct {
 	RootPath       string
 	LLMClient      LLMClient
 	MemoriesClient storage.MemoriesAPI
-	SignalRegistry *signals.Registry
-	MaxWorkers     int
+	SignalRegistry    *signals.Registry
+	KnowledgeRegistry *knowledge.Registry // optional: project-level knowledge sources
+	MaxWorkers        int
 	ProgressFn     func(phase string, done, total int) // optional progress callback
 	LogFn          func(level, msg string)              // optional log callback
 	Incremental    bool                                 // use manifest for incremental indexing
@@ -294,6 +296,26 @@ func Run(cfg Config) (*Result, error) {
 
 	wg.Wait()
 	result.Errors = append(result.Errors, contextErrors...)
+
+	// ── Phase 3b: Knowledge Documents ────────────────────────────────
+	if cfg.KnowledgeRegistry != nil {
+		logFn("info", "Fetching knowledge documents...")
+		knowledgeDocs, kErr := cfg.KnowledgeRegistry.FetchAll(cfg.ProjectName)
+		if kErr != nil {
+			result.Errors = append(result.Errors, kErr)
+		}
+		if len(knowledgeDocs) > 0 {
+			logFn("info", fmt.Sprintf("Found %d knowledge document(s)", len(knowledgeDocs)))
+			store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
+			for _, doc := range knowledgeDocs {
+				content := fmt.Sprintf("# %s\n\nSource: %s\nType: %s\n\n%s", doc.Title, doc.URL, doc.Type, doc.Content)
+				if err := store.StoreLayer("_knowledge", doc.Type+"/"+doc.Title, content); err != nil {
+					log.Printf("pipeline: warning: failed to store knowledge doc %s: %v", doc.Title, err)
+					result.Errors = append(result.Errors, err)
+				}
+			}
+		}
+	}
 
 	// ── Phase 4: Deep Analysis ─────────────────────────────────────────
 	logFn("info", fmt.Sprintf("Running deep analysis on %d module(s)...", len(work)))
