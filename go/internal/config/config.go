@@ -17,6 +17,7 @@ type Config struct {
 	LLMProvider   string
 	LLMApiKey     string
 	LLMBaseURL    string
+	GitHubToken   string
 }
 
 // persistedConfig is the JSON shape written to the config file.
@@ -30,6 +31,7 @@ type persistedConfig struct {
 	LLMProvider   string `json:"llm_provider,omitempty"`
 	LLMApiKey     string `json:"llm_api_key,omitempty"`
 	LLMBaseURL    string `json:"llm_base_url,omitempty"`
+	GitHubToken   string `json:"github_token,omitempty"`
 }
 
 // ConfigPath is the file path where UI settings are persisted.
@@ -47,6 +49,7 @@ func Load() Config {
 		LLMProvider:   envOr("LLM_PROVIDER", "anthropic"),
 		LLMApiKey:     os.Getenv("LLM_API_KEY"),
 		LLMBaseURL:    os.Getenv("LLM_BASE_URL"),
+		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
 	}
 
 	// Overlay persisted settings (only non-empty values override).
@@ -74,6 +77,7 @@ func Save(cfg Config) error {
 		LLMProvider:   cfg.LLMProvider,
 		LLMApiKey:     cfg.LLMApiKey,
 		LLMBaseURL:    cfg.LLMBaseURL,
+		GitHubToken:   cfg.GitHubToken,
 	}
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -119,6 +123,9 @@ func mergeConfig(cfg *Config, p persistedConfig) {
 	}
 	if p.LLMBaseURL != "" {
 		cfg.LLMBaseURL = p.LLMBaseURL
+	}
+	if p.GitHubToken != "" {
+		cfg.GitHubToken = p.GitHubToken
 	}
 }
 

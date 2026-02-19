@@ -24,6 +24,7 @@ interface Config {
   memories_url: string
   memories_key: string
   max_concurrent: number
+  github_token: string
 }
 
 interface ModelOption {
@@ -246,6 +247,7 @@ export default function Settings() {
     memories_url: '',
     memories_key: '',
     max_concurrent: 10,
+    github_token: '',
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -324,6 +326,9 @@ export default function Settings() {
       }
       if (config.llm_base_url) {
         patch.llm_base_url = config.llm_base_url
+      }
+      if (config.github_token && !config.github_token.includes('****')) {
+        patch.github_token = config.github_token
       }
 
       const res = await fetch('/api/config', {
@@ -539,6 +544,27 @@ export default function Settings() {
                   {connectionError && <p className="text-xs text-red-400">{connectionError}</p>}
                 </div>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-base">Integrations</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="github_token">GitHub Token</Label>
+              <Input
+                id="github_token"
+                type="password"
+                placeholder="ghp_... (optional, for private repos)"
+                value={config.github_token || ''}
+                onChange={(e) => updateField('github_token', e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Personal access token for cloning private repositories. Leave empty for public repos only.
+              </p>
             </div>
           </CardContent>
         </Card>

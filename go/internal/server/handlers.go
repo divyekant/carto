@@ -183,6 +183,7 @@ type configResponse struct {
 	LLMProvider   string `json:"llm_provider"`
 	LLMApiKey     string `json:"llm_api_key"`
 	LLMBaseURL    string `json:"llm_base_url"`
+	GitHubToken   string `json:"github_token"`
 }
 
 // handleGetConfig returns the current server config with API keys redacted.
@@ -201,6 +202,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		LLMProvider:   cfg.LLMProvider,
 		LLMApiKey:     redactKey(cfg.LLMApiKey),
 		LLMBaseURL:    cfg.LLMBaseURL,
+		GitHubToken:   redactKey(cfg.GitHubToken),
 	})
 }
 
@@ -250,6 +252,10 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		case "llm_base_url":
 			if v, ok := val.(string); ok {
 				s.cfg.LLMBaseURL = v
+			}
+		case "github_token":
+			if v, ok := val.(string); ok {
+				s.cfg.GitHubToken = v
 			}
 		}
 	}
