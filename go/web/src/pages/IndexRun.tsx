@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,6 +22,7 @@ interface CompleteData {
   atoms: number
   errors: number
   elapsed: string
+  error_messages?: string[]
 }
 
 interface LogEntry {
@@ -29,8 +32,10 @@ interface LogEntry {
 }
 
 export default function IndexRun() {
+  const [searchParams] = useSearchParams()
   const [state, setState] = useState<PageState>('idle')
   const [path, setPath] = useState('')
+  const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [module, setModule] = useState('')
   const [incremental, setIncremental] = useState(false)
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
@@ -56,6 +61,11 @@ export default function IndexRun() {
       eventSourceRef.current?.close()
     }
   }, [])
+
+  useEffect(() => {
+    const urlPath = searchParams.get('path')
+    if (urlPath) setPath(urlPath)
+  }, [searchParams])
 
   // Check for active/completed runs on mount so navigating away doesn't lose state
   useEffect(() => {
@@ -117,6 +127,7 @@ export default function IndexRun() {
       const projectName = data.project
 
       setPageState('running')
+      toast.success('Indexing started')
       connectSSE(projectName)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err))
@@ -155,6 +166,7 @@ export default function IndexRun() {
         const data = JSON.parse(e.data)
         const msg = data.message || 'Unknown pipeline error'
         setErrorMsg(msg)
+        toast.error(msg)
         setLogs(prev => [...prev, { level: 'error', message: msg, timestamp: Date.now() }])
       }
       setPageState('error')
@@ -165,6 +177,7 @@ export default function IndexRun() {
     es.onerror = () => {
       if (stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
+        toast.error('Connection to progress stream lost')
         setPageState('error')
       }
       es.close()
@@ -270,6 +283,27 @@ export default function IndexRun() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</p>
+                {result.errors > 0 && result.error_messages && result.error_messages.length > 0 && (
+                  <div className="border-t border-border pt-3">
+                    <button
+                      onClick={() => setErrorsExpanded(!errorsExpanded)}
+                      className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors w-full text-left"
+                    >
+                      <span className={`transition-transform ${errorsExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                      <span>{result.error_messages.length} error{result.error_messages.length !== 1 ? 's' : ''} — click to {errorsExpanded ? 'collapse' : 'expand'}</span>
+                    </button>
+                    {errorsExpanded && (
+                      <div className="mt-2 bg-muted/50 rounded-md p-3 max-h-48 overflow-y-auto font-mono text-xs space-y-1">
+                        {result.error_messages.map((msg, i) => (
+                          <div key={i} className="flex gap-2">
+                            <span className="text-red-400 shrink-0">&#10007;</span>
+                            <span className="text-red-400">{msg}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <Button variant="secondary" onClick={reset}>Index Another</Button>
               </CardContent>
             </Card>
