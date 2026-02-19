@@ -399,7 +399,7 @@ export default function Settings() {
     <div>
       <h2 className="text-2xl font-bold mb-6">Settings</h2>
 
-      <div className="space-y-6 max-w-lg">
+      <div className="space-y-6 max-w-2xl">
         {isDockerEnv && (
           <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-400">
             Running in Docker — <code className="text-xs bg-muted px-1 rounded">localhost</code> URLs are automatically routed to your host machine.
@@ -411,63 +411,65 @@ export default function Settings() {
             <CardTitle className="text-base">LLM Provider</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <Select value={provider} onValueChange={handleProviderChange}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI-Compatible</SelectItem>
-                  <SelectItem value="ollama">Ollama</SelectItem>
-                </SelectContent>
-              </Select>
-              {errors.provider && touched.has('llm_provider') && (
-                <p className="text-sm text-red-400">{errors.provider}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select value={provider} onValueChange={handleProviderChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="anthropic">Anthropic</SelectItem>
+                    <SelectItem value="openai">OpenAI-Compatible</SelectItem>
+                    <SelectItem value="ollama">Ollama</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.provider && touched.has('llm_provider') && (
+                  <p className="text-sm text-red-400">{errors.provider}</p>
+                )}
+              </div>
+
+              {/* Anthropic uses its own key field */}
+              {provider === 'anthropic' && (
+                <div className="space-y-2">
+                  <Label htmlFor="anthropic_key">API Key</Label>
+                  <Input
+                    id="anthropic_key"
+                    type="password"
+                    placeholder="sk-ant-api03-..."
+                    value={config.anthropic_key || ''}
+                    onChange={(e) => updateField('anthropic_key', e.target.value)}
+                  />
+                  {errors.apiKey && touched.has('anthropic_key') && (
+                    <p className="text-sm text-red-400">{errors.apiKey}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Supports standard keys and OAuth tokens
+                  </p>
+                </div>
+              )}
+
+              {/* Non-Anthropic providers use llm_api_key */}
+              {showLlmApiKey && (
+                <div className="space-y-2">
+                  <Label htmlFor="llm_api_key">API Key</Label>
+                  <Input
+                    id="llm_api_key"
+                    type={provider === 'ollama' ? 'text' : 'password'}
+                    placeholder={defaults.keyPlaceholder}
+                    value={config.llm_api_key || ''}
+                    onChange={(e) => updateField('llm_api_key', e.target.value)}
+                    disabled={provider === 'ollama'}
+                  />
+                  {provider === 'ollama' && (
+                    <p className="text-xs text-muted-foreground">No API key needed</p>
+                  )}
+                  {errors.apiKey && touched.has('llm_api_key') && (
+                    <p className="text-sm text-red-400">{errors.apiKey}</p>
+                  )}
+                </div>
               )}
             </div>
-
-            {/* Anthropic uses its own key field */}
-            {provider === 'anthropic' && (
-              <div className="space-y-2">
-                <Label htmlFor="anthropic_key">API Key</Label>
-                <Input
-                  id="anthropic_key"
-                  type="password"
-                  placeholder="sk-ant-api03-..."
-                  value={config.anthropic_key || ''}
-                  onChange={(e) => updateField('anthropic_key', e.target.value)}
-                />
-                {errors.apiKey && touched.has('anthropic_key') && (
-                  <p className="text-sm text-red-400">{errors.apiKey}</p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Supports standard keys (sk-ant-api03-) and OAuth tokens (sk-ant-oat01-)
-                </p>
-              </div>
-            )}
-
-            {/* Non-Anthropic providers use llm_api_key */}
-            {showLlmApiKey && (
-              <div className="space-y-2">
-                <Label htmlFor="llm_api_key">API Key</Label>
-                <Input
-                  id="llm_api_key"
-                  type={provider === 'ollama' ? 'text' : 'password'}
-                  placeholder={defaults.keyPlaceholder}
-                  value={config.llm_api_key || ''}
-                  onChange={(e) => updateField('llm_api_key', e.target.value)}
-                  disabled={provider === 'ollama'}
-                />
-                {provider === 'ollama' && (
-                  <p className="text-xs text-muted-foreground">Ollama runs locally — no API key needed</p>
-                )}
-                {errors.apiKey && touched.has('llm_api_key') && (
-                  <p className="text-sm text-red-400">{errors.apiKey}</p>
-                )}
-              </div>
-            )}
 
             {showBaseUrl && (
               <div className="space-y-2">
@@ -484,90 +486,94 @@ export default function Settings() {
               </div>
             )}
 
-            <ModelSelect
-              label="Fast Model"
-              description="High-volume, low-cost model for atom analysis"
-              models={defaults.fastModels}
-              value={config.fast_model || ''}
-              onChange={(v) => updateField('fast_model', v)}
-              error={errors.fastModel && touched.has('fast_model') ? errors.fastModel : undefined}
-            />
-
-            <ModelSelect
-              label="Deep Model"
-              description="Low-volume, high-cost model for architectural analysis"
-              models={defaults.deepModels}
-              value={config.deep_model || ''}
-              onChange={(v) => updateField('deep_model', v)}
-              error={errors.deepModel && touched.has('deep_model') ? errors.deepModel : undefined}
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base">Memories Server</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="memories_url">URL</Label>
-              <Input
-                id="memories_url"
-                placeholder="http://localhost:8900"
-                value={config.memories_url || ''}
-                onChange={(e) => updateField('memories_url', e.target.value)}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ModelSelect
+                label="Fast Model"
+                description="High-volume, low-cost model for atom analysis"
+                models={defaults.fastModels}
+                value={config.fast_model || ''}
+                onChange={(v) => updateField('fast_model', v)}
+                error={errors.fastModel && touched.has('fast_model') ? errors.fastModel : undefined}
               />
-              {errors.memoriesUrl && touched.has('memories_url') && (
-                <p className="text-sm text-red-400">{errors.memoriesUrl}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="memories_key">API Key</Label>
-              <Input
-                id="memories_key"
-                type="password"
-                placeholder="(optional)"
-                value={config.memories_key || ''}
-                onChange={(e) => updateField('memories_key', e.target.value)}
+
+              <ModelSelect
+                label="Deep Model"
+                description="Low-volume, high-cost model for architectural analysis"
+                models={defaults.deepModels}
+                value={config.deep_model || ''}
+                onChange={(v) => updateField('deep_model', v)}
+                error={errors.deepModel && touched.has('deep_model') ? errors.deepModel : undefined}
               />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button variant="secondary" onClick={testConnection} disabled={connectionStatus === 'testing'}>
-                {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
-              </Button>
-              {connectionStatus === 'connected' && (
-                <Badge variant="default" className="text-xs">Connected</Badge>
-              )}
-              {connectionStatus === 'unreachable' && (
-                <div className="flex flex-col gap-1">
-                  <Badge variant="destructive" className="text-xs">Unreachable</Badge>
-                  {connectionError && <p className="text-xs text-red-400">{connectionError}</p>}
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base">Integrations</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="github_token">GitHub Token</Label>
-              <Input
-                id="github_token"
-                type="password"
-                placeholder="ghp_... (optional, for private repos)"
-                value={config.github_token || ''}
-                onChange={(e) => updateField('github_token', e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Personal access token for cloning private repositories. Leave empty for public repos only.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base">Memories Server</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="memories_url">URL</Label>
+                <Input
+                  id="memories_url"
+                  placeholder="http://localhost:8900"
+                  value={config.memories_url || ''}
+                  onChange={(e) => updateField('memories_url', e.target.value)}
+                />
+                {errors.memoriesUrl && touched.has('memories_url') && (
+                  <p className="text-sm text-red-400">{errors.memoriesUrl}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="memories_key">API Key</Label>
+                <Input
+                  id="memories_key"
+                  type="password"
+                  placeholder="(optional)"
+                  value={config.memories_key || ''}
+                  onChange={(e) => updateField('memories_key', e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="secondary" onClick={testConnection} disabled={connectionStatus === 'testing'}>
+                  {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                </Button>
+                {connectionStatus === 'connected' && (
+                  <Badge variant="default" className="text-xs">Connected</Badge>
+                )}
+                {connectionStatus === 'unreachable' && (
+                  <div className="flex flex-col gap-1">
+                    <Badge variant="destructive" className="text-xs">Unreachable</Badge>
+                    {connectionError && <p className="text-xs text-red-400">{connectionError}</p>}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base">Integrations</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="github_token">GitHub Token</Label>
+                <Input
+                  id="github_token"
+                  type="password"
+                  placeholder="ghp_... (optional)"
+                  value={config.github_token || ''}
+                  onChange={(e) => updateField('github_token', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enables private repo cloning and fetching GitHub issues/PRs as context during indexing.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <Button onClick={save} disabled={saving}>
           {saving ? 'Saving...' : 'Save Settings'}
