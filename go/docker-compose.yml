@@ -4,7 +4,7 @@ services:
     ports:
       - "8950:8950"
     volumes:
-      - ${PROJECTS_DIR:-~/projects}:/projects:ro
+      - ${PROJECTS_DIR:-~/projects}:/projects
     environment:
       - MEMORIES_URL=${MEMORIES_URL:-http://host.docker.internal:8900}
       - MEMORIES_API_KEY=${MEMORIES_API_KEY}
