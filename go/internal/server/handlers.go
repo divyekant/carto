@@ -351,6 +351,9 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		ProgressFn: func(phase string, done, total int) {
 			run.SendProgress(phase, done, total)
 		},
+		LogFn: func(level, msg string) {
+			run.SendLog(level, msg)
+		},
 		Incremental:  req.Incremental,
 		ModuleFilter: req.Module,
 	})
@@ -391,4 +394,13 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run.WriteSSE(w, r)
+}
+
+// handleListRuns returns the status of all active/recent indexing runs.
+func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	runs := s.runs.ListRuns()
+	if runs == nil {
+		runs = []RunStatus{}
+	}
+	writeJSON(w, http.StatusOK, runs)
 }

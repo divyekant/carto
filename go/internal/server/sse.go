@@ -32,6 +32,10 @@ type IndexRun struct {
 	mu        sync.Mutex
 	lastEvent *sseEvent // buffered final event for late-connecting clients
 	finished  bool
+
+	// Stored result/error for the runs API so the UI can restore state.
+	FinalResult *IndexResult
+	FinalError  string
 }
 
 // sseEvent is a typed SSE message sent over the events channel.
@@ -56,9 +60,19 @@ func (r *IndexRun) SendResult(result IndexResult) {
 	ev := sseEvent{Event: "complete", Data: string(data)}
 	r.mu.Lock()
 	r.lastEvent = &ev
+	r.FinalResult = &result
 	r.mu.Unlock()
 	select {
 	case r.events <- ev:
+	default:
+	}
+}
+
+// SendLog sends a log message event to the SSE stream.
+func (r *IndexRun) SendLog(level, msg string) {
+	data, _ := json.Marshal(map[string]string{"level": level, "message": msg})
+	select {
+	case r.events <- sseEvent{Event: "log", Data: string(data)}:
 	default:
 	}
 }
@@ -70,6 +84,7 @@ func (r *IndexRun) SendError(msg string) {
 	ev := sseEvent{Event: "pipeline_error", Data: string(data)}
 	r.mu.Lock()
 	r.lastEvent = &ev
+	r.FinalError = msg
 	r.mu.Unlock()
 	select {
 	case r.events <- ev:
@@ -215,4 +230,38 @@ func (m *RunManager) Get(project string) *IndexRun {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.runs[project]
+}
+
+// RunStatus is the JSON shape returned by the runs endpoint.
+type RunStatus struct {
+	Project string       `json:"project"`
+	Status  string       `json:"status"` // "running", "complete", "error"
+	Result  *IndexResult `json:"result,omitempty"`
+	Error   string       `json:"error,omitempty"`
+}
+
+// ListRuns returns the status of all tracked runs.
+func (m *RunManager) ListRuns() []RunStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var runs []RunStatus
+	for name, run := range m.runs {
+		run.mu.Lock()
+		status := RunStatus{Project: name}
+		if !run.finished {
+			status.Status = "running"
+		} else if run.FinalError != "" {
+			status.Status = "error"
+			status.Error = run.FinalError
+		} else if run.FinalResult != nil {
+			status.Status = "complete"
+			status.Result = run.FinalResult
+		} else {
+			status.Status = "complete"
+		}
+		run.mu.Unlock()
+		runs = append(runs, status)
+	}
+	return runs
 }

@@ -20,6 +20,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/projects/index", s.handleStartIndex)
 	s.mux.HandleFunc("GET /api/projects/{name}/progress", s.handleProgress)
 	s.mux.HandleFunc("POST /api/test-memories", s.handleTestMemories)
+	s.mux.HandleFunc("GET /api/projects/runs", s.handleListRuns)
 
 	// SPA static files + fallback (only when embedded assets are provided).
 	if s.webFS != nil {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,26 +25,80 @@ interface Config {
   max_concurrent: number
 }
 
-const PROVIDER_DEFAULTS: Record<string, { fast: string; deep: string; baseUrl: string; keyPlaceholder: string }> = {
+interface ModelOption {
+  value: string
+  label: string
+  description: string
+}
+
+interface ProviderConfig {
+  fast: string
+  deep: string
+  baseUrl: string
+  keyPlaceholder: string
+  fastModels: ModelOption[]
+  deepModels: ModelOption[]
+}
+
+const PROVIDER_DEFAULTS: Record<string, ProviderConfig> = {
   anthropic: {
     fast: 'claude-haiku-4-5-20251001',
     deep: 'claude-opus-4-6',
     baseUrl: '',
     keyPlaceholder: 'sk-ant-api03-...',
+    fastModels: [
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', description: 'Fastest, $1/$5 per MTok' },
+      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Fast, $3/$15 per MTok' },
+      { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', description: 'Previous gen, $3/$15 per MTok' },
+      { value: 'claude-3-haiku-20240307', label: 'Claude Haiku 3', description: 'Legacy, $0.25/$1.25 per MTok' },
+    ],
+    deepModels: [
+      { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most intelligent, $5/$25 per MTok' },
+      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Near-Opus quality, $3/$15 per MTok' },
+      { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5', description: 'Previous gen, $5/$25 per MTok' },
+      { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', description: 'Previous gen, $3/$15 per MTok' },
+    ],
   },
   openai: {
-    fast: 'gpt-4o-mini',
-    deep: 'gpt-4o',
+    fast: 'gpt-4.1-mini',
+    deep: 'gpt-4.1',
     baseUrl: 'https://api.openai.com/v1',
     keyPlaceholder: 'sk-...',
+    fastModels: [
+      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Fast and affordable' },
+      { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano', description: 'Smallest, cheapest' },
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini', description: 'Previous gen' },
+      { value: 'o3-mini', label: 'o3-mini', description: 'Small reasoning model' },
+    ],
+    deepModels: [
+      { value: 'gpt-4.1', label: 'GPT-4.1', description: 'Best coding & instruction following' },
+      { value: 'gpt-4o', label: 'GPT-4o', description: 'Previous gen flagship' },
+      { value: 'o3', label: 'o3', description: 'Advanced reasoning' },
+    ],
   },
   ollama: {
     fast: 'llama3.2',
     deep: 'llama3.2',
     baseUrl: 'http://localhost:11434',
     keyPlaceholder: '(not required for Ollama)',
+    fastModels: [
+      { value: 'llama3.2', label: 'Llama 3.2', description: '1B/3B, lightweight' },
+      { value: 'llama3.3', label: 'Llama 3.3', description: '70B quality' },
+      { value: 'qwen3', label: 'Qwen 3', description: 'Dense & MoE variants' },
+      { value: 'gemma2', label: 'Gemma 2', description: '2B/9B/27B by Google' },
+      { value: 'phi3', label: 'Phi-3', description: '3B/14B by Microsoft' },
+    ],
+    deepModels: [
+      { value: 'llama3.2', label: 'Llama 3.2', description: '1B/3B, lightweight' },
+      { value: 'llama3.3', label: 'Llama 3.3', description: '70B quality' },
+      { value: 'qwen3', label: 'Qwen 3', description: 'Dense & MoE variants' },
+      { value: 'deepseek-r1', label: 'DeepSeek R1', description: 'Strong reasoning' },
+      { value: 'mistral', label: 'Mistral 7B', description: 'Versatile 7B model' },
+    ],
   },
 }
+
+const CUSTOM_MODEL_VALUE = '__custom__'
 
 interface ValidationErrors {
   provider?: string
@@ -103,6 +157,81 @@ function validate(config: Config): ValidationErrors {
   }
 
   return errors
+}
+
+function ModelSelect({ label, description, models, value, onChange, error }: {
+  label: string
+  description: string
+  models: ModelOption[]
+  value: string
+  onChange: (value: string) => void
+  error?: string
+}) {
+  const isCustom = value !== '' && !models.some(m => m.value === value)
+  const [showCustomInput, setShowCustomInput] = useState(isCustom)
+  const [customValue, setCustomValue] = useState(isCustom ? value : '')
+
+  // Keep custom state in sync if value changes externally (e.g. provider switch)
+  const prevModelsRef = useRef(models)
+  useEffect(() => {
+    if (prevModelsRef.current !== models) {
+      prevModelsRef.current = models
+      const stillCustom = value !== '' && !models.some(m => m.value === value)
+      setShowCustomInput(stillCustom)
+      setCustomValue(stillCustom ? value : '')
+    }
+  }, [models, value])
+
+  function handleSelectChange(v: string) {
+    if (v === CUSTOM_MODEL_VALUE) {
+      setShowCustomInput(true)
+      setCustomValue('')
+      onChange('')
+    } else {
+      setShowCustomInput(false)
+      setCustomValue('')
+      onChange(v)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Select
+        value={showCustomInput ? CUSTOM_MODEL_VALUE : value}
+        onValueChange={handleSelectChange}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="Select a model" />
+        </SelectTrigger>
+        <SelectContent>
+          {models.map(m => (
+            <SelectItem key={m.value} value={m.value}>
+              <span>{m.label}</span>
+              <span className="ml-2 text-muted-foreground text-xs">{m.description}</span>
+            </SelectItem>
+          ))}
+          <SelectItem value={CUSTOM_MODEL_VALUE}>
+            <span>Custom...</span>
+            <span className="ml-2 text-muted-foreground text-xs">Enter a model ID manually</span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {showCustomInput && (
+        <Input
+          placeholder="e.g. my-custom-model"
+          value={customValue}
+          onChange={(e) => {
+            setCustomValue(e.target.value)
+            onChange(e.target.value)
+          }}
+          autoFocus
+        />
+      )}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  )
 }
 
 export default function Settings() {
@@ -343,33 +472,23 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="fast_model">Fast Model</Label>
-              <Input
-                id="fast_model"
-                placeholder={defaults.fast}
-                value={config.fast_model || ''}
-                onChange={(e) => updateField('fast_model', e.target.value)}
-              />
-              {errors.fastModel && touched.has('fast_model') && (
-                <p className="text-sm text-red-400">{errors.fastModel}</p>
-              )}
-              <p className="text-xs text-muted-foreground">High-volume, low-cost model for atom analysis</p>
-            </div>
+            <ModelSelect
+              label="Fast Model"
+              description="High-volume, low-cost model for atom analysis"
+              models={defaults.fastModels}
+              value={config.fast_model || ''}
+              onChange={(v) => updateField('fast_model', v)}
+              error={errors.fastModel && touched.has('fast_model') ? errors.fastModel : undefined}
+            />
 
-            <div className="space-y-2">
-              <Label htmlFor="deep_model">Deep Model</Label>
-              <Input
-                id="deep_model"
-                placeholder={defaults.deep}
-                value={config.deep_model || ''}
-                onChange={(e) => updateField('deep_model', e.target.value)}
-              />
-              {errors.deepModel && touched.has('deep_model') && (
-                <p className="text-sm text-red-400">{errors.deepModel}</p>
-              )}
-              <p className="text-xs text-muted-foreground">Low-volume, high-cost model for architectural analysis</p>
-            </div>
+            <ModelSelect
+              label="Deep Model"
+              description="Low-volume, high-cost model for architectural analysis"
+              models={defaults.deepModels}
+              value={config.deep_model || ''}
+              onChange={(v) => updateField('deep_model', v)}
+              error={errors.deepModel && touched.has('deep_model') ? errors.deepModel : undefined}
+            />
           </CardContent>
         </Card>
 

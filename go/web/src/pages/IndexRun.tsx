@@ -22,6 +22,12 @@ interface CompleteData {
   elapsed: string
 }
 
+interface LogEntry {
+  level: string
+  message: string
+  timestamp: number
+}
+
 export default function IndexRun() {
   const [state, setState] = useState<PageState>('idle')
   const [path, setPath] = useState('')
@@ -30,18 +36,49 @@ export default function IndexRun() {
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
   const [result, setResult] = useState<CompleteData | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [logs, setLogs] = useState<LogEntry[]>([])
   const eventSourceRef = useRef<EventSource | null>(null)
   const stateRef = useRef<PageState>('idle')
+  const logEndRef = useRef<HTMLDivElement>(null)
 
   function setPageState(s: PageState) {
     stateRef.current = s
     setState(s)
   }
 
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs])
+
   useEffect(() => {
     return () => {
       eventSourceRef.current?.close()
     }
+  }, [])
+
+  // Check for active/completed runs on mount so navigating away doesn't lose state
+  useEffect(() => {
+    fetch('/api/projects/runs')
+      .then(r => r.json())
+      .then((runs: Array<{ project: string; status: string; result?: CompleteData; error?: string }>) => {
+        if (runs.length > 0) {
+          const lastRun = runs[0]
+          if (lastRun.status === 'running') {
+            setPageState('running')
+            setLogs([{ level: 'info', message: 'Reconnecting to active run...', timestamp: Date.now() }])
+            connectSSE(lastRun.project)
+          } else if (lastRun.status === 'complete' && lastRun.result) {
+            setResult(lastRun.result)
+            setPageState('complete')
+          } else if (lastRun.status === 'error' && lastRun.error) {
+            setErrorMsg(lastRun.error)
+            setPageState('error')
+          }
+        }
+      })
+      .catch(() => {}) // Silently ignore if endpoint not available
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function reset() {
@@ -51,6 +88,7 @@ export default function IndexRun() {
     setProgress({ phase: '', done: 0, total: 0 })
     setResult(null)
     setErrorMsg('')
+    setLogs([])
   }
 
   async function startIndexing() {
@@ -58,6 +96,7 @@ export default function IndexRun() {
     setPageState('starting')
     setErrorMsg('')
     setResult(null)
+    setLogs([])
 
     try {
       const body: Record<string, unknown> = { path: path.trim(), incremental }
@@ -94,9 +133,17 @@ export default function IndexRun() {
       setProgress(data)
     })
 
+    es.addEventListener('log', (e) => {
+      if (e instanceof MessageEvent && e.data) {
+        const data = JSON.parse(e.data)
+        setLogs(prev => [...prev, { level: data.level, message: data.message, timestamp: Date.now() }])
+      }
+    })
+
     es.addEventListener('complete', (e) => {
       const data: CompleteData = JSON.parse(e.data)
       setResult(data)
+      setLogs(prev => [...prev, { level: 'info', message: 'Indexing complete!', timestamp: Date.now() }])
       setPageState('complete')
       es.close()
     })
@@ -106,7 +153,9 @@ export default function IndexRun() {
     es.addEventListener('pipeline_error', (e) => {
       if (e instanceof MessageEvent && e.data) {
         const data = JSON.parse(e.data)
-        setErrorMsg(data.message || 'Unknown pipeline error')
+        const msg = data.message || 'Unknown pipeline error'
+        setErrorMsg(msg)
+        setLogs(prev => [...prev, { level: 'error', message: msg, timestamp: Date.now() }])
       }
       setPageState('error')
       es.close()
@@ -114,7 +163,6 @@ export default function IndexRun() {
 
     // SSE connection-level errors (network failures, stream dropped).
     es.onerror = () => {
-      // Only treat as error if we haven't already completed or received a pipeline error.
       if (stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
         setPageState('error')
@@ -179,65 +227,101 @@ export default function IndexRun() {
         </Card>
       )}
 
-      {state === 'running' && (
-        <Card className="bg-card border-border max-w-lg">
-          <CardHeader>
-            <CardTitle className="text-base">Indexing in Progress</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
-          </CardContent>
-        </Card>
-      )}
+      {(state === 'running' || state === 'complete' || state === 'error') && (
+        <div className="space-y-4 max-w-2xl">
+          {state === 'running' && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="text-base">Indexing in Progress</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+              </CardContent>
+            </Card>
+          )}
 
-      {state === 'complete' && result && (
-        <Card className="bg-card border-border max-w-lg">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-base">Indexing Complete</CardTitle>
-              <Badge variant="default" className="text-xs">Done</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-muted-foreground">Modules</span>
-                <p className="text-foreground font-medium">{result.modules}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Files</span>
-                <p className="text-foreground font-medium">{result.files}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Atoms</span>
-                <p className="text-foreground font-medium">{result.atoms}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Errors</span>
-                <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'text-foreground font-medium'}>
-                  {result.errors}
-                </p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</p>
-            <Button variant="secondary" onClick={reset}>Index Another</Button>
-          </CardContent>
-        </Card>
-      )}
+          {state === 'complete' && result && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Indexing Complete</CardTitle>
+                  <Badge variant="default" className="text-xs">Done</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Modules</span>
+                    <p className="text-foreground font-medium">{result.modules}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Files</span>
+                    <p className="text-foreground font-medium">{result.files}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Atoms</span>
+                    <p className="text-foreground font-medium">{result.atoms}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Errors</span>
+                    <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'text-foreground font-medium'}>
+                      {result.errors}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</p>
+                <Button variant="secondary" onClick={reset}>Index Another</Button>
+              </CardContent>
+            </Card>
+          )}
 
-      {state === 'error' && (
-        <Card className="bg-card border-destructive/30 max-w-lg">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-base">Error</CardTitle>
-              <Badge variant="destructive" className="text-xs">Failed</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-red-400">{errorMsg}</p>
-            <Button variant="secondary" onClick={reset}>Try Again</Button>
-          </CardContent>
-        </Card>
+          {state === 'error' && (
+            <Card className="bg-card border-destructive/30">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Error</CardTitle>
+                  <Badge variant="destructive" className="text-xs">Failed</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-red-400">{errorMsg}</p>
+                <Button variant="secondary" onClick={reset}>Try Again</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Pipeline Log */}
+          {logs.length > 0 && (
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Pipeline Log</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto font-mono text-xs space-y-1">
+                  {logs.map((entry, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className={
+                        entry.level === 'error' ? 'text-red-400 shrink-0' :
+                        entry.level === 'warn' ? 'text-yellow-400 shrink-0' :
+                        'text-muted-foreground shrink-0'
+                      }>
+                        {entry.level === 'error' ? '✗' : entry.level === 'warn' ? '⚠' : '▸'}
+                      </span>
+                      <span className={
+                        entry.level === 'error' ? 'text-red-400' :
+                        entry.level === 'warn' ? 'text-yellow-400' :
+                        'text-foreground'
+                      }>
+                        {entry.message}
+                      </span>
+                    </div>
+                  ))}
+                  <div ref={logEndRef} />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   )

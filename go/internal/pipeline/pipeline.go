@@ -38,6 +38,7 @@ type Config struct {
 	SignalRegistry *signals.Registry
 	MaxWorkers     int
 	ProgressFn     func(phase string, done, total int) // optional progress callback
+	LogFn          func(level, msg string)              // optional log callback
 	Incremental    bool                                 // use manifest for incremental indexing
 	ModuleFilter   string                               // optional: index only this module
 }
@@ -73,8 +74,13 @@ func Run(cfg Config) (*Result, error) {
 	if progress == nil {
 		progress = func(string, int, int) {}
 	}
+	logFn := cfg.LogFn
+	if logFn == nil {
+		logFn = func(string, string) {}
+	}
 
 	// ── Phase 1: Scan ──────────────────────────────────────────────────
+	logFn("info", fmt.Sprintf("Scanning %s...", cfg.RootPath))
 	progress("scan", 0, 1)
 
 	scanResult, err := scanner.Scan(cfg.RootPath)
@@ -99,14 +105,20 @@ func Run(cfg Config) (*Result, error) {
 		return nil, fmt.Errorf("pipeline: module %q not found. available: %v", cfg.ModuleFilter, available)
 	}
 	if len(modules) == 0 {
+		logFn("info", "No modules found, nothing to index")
 		return result, nil
 	}
+	logFn("info", fmt.Sprintf("Found %d module(s) with %d total files", len(modules), countModuleFiles(modules)))
 
 	// Load/create manifest — always track indexed files so subsequent runs
 	// can use --incremental. In non-incremental mode we still save at the end.
+	if cfg.Incremental {
+		logFn("info", "Incremental mode: checking for changed files...")
+	}
 	mf, err := manifest.Load(cfg.RootPath)
 	if err != nil {
 		log.Printf("pipeline: warning: failed to load manifest, starting fresh: %v", err)
+		logFn("warn", "Failed to load manifest, starting fresh")
 		mf = manifest.NewManifest(cfg.RootPath, cfg.ProjectName)
 	}
 
@@ -156,6 +168,8 @@ func Run(cfg Config) (*Result, error) {
 	result.FilesIndexed = totalFiles
 
 	// ── Phase 2: Chunk + Atoms (parallel per module) ───────────────────
+	logFn("info", fmt.Sprintf("Chunking and analyzing %d files across %d module(s)...", totalFiles, len(work)))
+
 	type moduleAtoms struct {
 		module scanner.Module
 		atoms  []*atoms.Atom
@@ -220,6 +234,8 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	// ── Phase 3: History + Signals (parallel per module) ───────────────
+	logFn("info", fmt.Sprintf("Extracted %d atoms. Fetching git history and signals...", result.AtomsCreated))
+
 	type moduleContext struct {
 		history []*history.FileHistory
 		signals []signals.Signal
@@ -280,6 +296,7 @@ func Run(cfg Config) (*Result, error) {
 	result.Errors = append(result.Errors, contextErrors...)
 
 	// ── Phase 4: Deep Analysis ─────────────────────────────────────────
+	logFn("info", fmt.Sprintf("Running deep analysis on %d module(s)...", len(work)))
 	deepAnalyzer := analyzer.NewDeepAnalyzer(cfg.LLMClient)
 
 	// Build ModuleInput for each module.
@@ -315,6 +332,7 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	// ── Phase 5: Store ─────────────────────────────────────────────────
+	logFn("info", "Storing results in Memories...")
 	store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
 	storeDone := 0
 	// Total store ops: per-module layers (5 each) + system-wide (2).
@@ -479,4 +497,13 @@ func findModuleAnalysis(analyses []analyzer.ModuleAnalysis, name string) *analyz
 		}
 	}
 	return nil
+}
+
+// countModuleFiles counts the total files across all modules.
+func countModuleFiles(modules []scanner.Module) int {
+	n := 0
+	for _, m := range modules {
+		n += len(m.Files)
+	}
+	return n
 }
