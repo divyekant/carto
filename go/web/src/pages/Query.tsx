@@ -25,6 +25,7 @@ interface Result {
 
 const tiers = ['mini', 'standard', 'full'] as const
 type Tier = (typeof tiers)[number]
+const PAGE_SIZE = 20
 
 export default function Query() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -35,6 +36,7 @@ export default function Query() {
   const [results, setResults] = useState<Result[]>([])
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     fetch('/api/projects')
@@ -51,6 +53,7 @@ export default function Query() {
     if (!text.trim() || !project) return
     setSearching(true)
     setResults([])
+    setVisibleCount(PAGE_SIZE)
     setSearched(false)
 
     try {
@@ -144,9 +147,19 @@ export default function Query() {
       </div>
 
       <div className="space-y-3">
-        {results.map((r, i) => (
+        {results.slice(0, visibleCount).map((r, i) => (
           <QueryResult key={r.id || i} index={i + 1} source={r.source} score={r.score} text={r.text} />
         ))}
+        {results.length > visibleCount && (
+          <div className="text-center py-4">
+            <Button
+              variant="secondary"
+              onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+            >
+              Show more ({results.length - visibleCount} remaining)
+            </Button>
+          </div>
+        )}
         {searched && results.length === 0 && (
           <p className="text-muted-foreground text-sm py-8 text-center">No results found.</p>
         )}
