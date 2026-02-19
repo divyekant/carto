@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { FolderPicker } from '@/components/FolderPicker'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ProgressBar } from '@/components/ProgressBar'
@@ -34,7 +35,10 @@ interface LogEntry {
 export default function IndexRun() {
   const [searchParams] = useSearchParams()
   const [state, setState] = useState<PageState>('idle')
+  const [inputMode, setInputMode] = useState<'local' | 'git'>('local')
   const [path, setPath] = useState('')
+  const [gitUrl, setGitUrl] = useState('')
+  const [branch, setBranch] = useState('')
   const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [module, setModule] = useState('')
   const [incremental, setIncremental] = useState(false)
@@ -102,14 +106,21 @@ export default function IndexRun() {
   }
 
   async function startIndexing() {
-    if (!path.trim()) return
+    if (inputMode === 'local' && !path.trim()) return
+    if (inputMode === 'git' && !gitUrl.trim()) return
     setPageState('starting')
     setErrorMsg('')
     setResult(null)
     setLogs([])
 
     try {
-      const body: Record<string, unknown> = { path: path.trim(), incremental }
+      const body: Record<string, unknown> = { incremental }
+      if (inputMode === 'local') {
+        body.path = path.trim()
+      } else {
+        body.url = gitUrl.trim()
+        if (branch.trim()) body.branch = branch.trim()
+      }
       if (module.trim()) body.module = module.trim()
 
       const res = await fetch('/api/projects/index', {
@@ -194,18 +205,57 @@ export default function IndexRun() {
             <CardTitle className="text-base">Start Indexing</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="path">Project Path</Label>
-              <Input
-                id="path"
-                placeholder="/projects/my-project"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Path inside the container. Projects are mounted at <code className="text-xs bg-muted px-1 rounded">/projects/</code>
-              </p>
+            {/* Tab toggle */}
+            <div className="flex gap-1 p-1 bg-muted rounded-lg">
+              <button
+                className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setInputMode('local')}
+              >
+                Local Path
+              </button>
+              <button
+                className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setInputMode('git')}
+              >
+                Git URL
+              </button>
             </div>
+
+            {inputMode === 'local' && (
+              <div className="space-y-2">
+                <Label>Project Path</Label>
+                <FolderPicker value={path} onChange={setPath} />
+              </div>
+            )}
+
+            {inputMode === 'git' && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="gitUrl">Repository URL</Label>
+                  <Input
+                    id="gitUrl"
+                    placeholder="https://github.com/user/repo"
+                    value={gitUrl}
+                    onChange={(e) => setGitUrl(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="branch">Branch (optional)</Label>
+                  <Input
+                    id="branch"
+                    placeholder="main"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Module filter and incremental checkbox */}
             <div className="space-y-2">
               <Label htmlFor="module">Module Filter (optional)</Label>
               <Input
@@ -225,7 +275,7 @@ export default function IndexRun() {
               />
               <Label htmlFor="incremental">Incremental</Label>
             </div>
-            <Button onClick={startIndexing} disabled={!path.trim()}>
+            <Button onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
               Start Indexing
             </Button>
           </CardContent>
