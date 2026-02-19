@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/divyekant/carto/internal/config"
@@ -341,11 +342,20 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	registry := signals.NewRegistry()
 	registry.Register(signals.NewGitSignalSource(absPath))
 
+	// Create a fresh Memories client from the current config so Settings
+	// changes take effect without server restart.
+	memoriesURL := cfg.MemoriesURL
+	if isDocker() {
+		memoriesURL = strings.Replace(memoriesURL, "localhost", "host.docker.internal", 1)
+		memoriesURL = strings.Replace(memoriesURL, "127.0.0.1", "host.docker.internal", 1)
+	}
+	memoriesClient := storage.NewMemoriesClient(memoriesURL, cfg.MemoriesKey)
+
 	result, err := pipeline.Run(pipeline.Config{
 		ProjectName:    projectName,
 		RootPath:       absPath,
 		LLMClient:      llmClient,
-		MemoriesClient: s.memoriesClient,
+		MemoriesClient: memoriesClient,
 		SignalRegistry: registry,
 		MaxWorkers:     cfg.MaxConcurrent,
 		ProgressFn: func(phase string, done, total int) {

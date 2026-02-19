@@ -425,6 +425,34 @@ func TestRunManager_StartAndFinish(t *testing.T) {
 	mgr.Finish("project2")
 }
 
+func TestRunIndex_UsesCurrentConfig(t *testing.T) {
+	cfg := config.Config{
+		MemoriesURL: "http://original:8900",
+		MemoriesKey: "original-key",
+	}
+	memoriesClient := storage.NewMemoriesClient("http://original:8900", "original-key")
+	srv := New(cfg, memoriesClient, "", nil)
+
+	patchBody := strings.NewReader(`{"memories_url": "http://updated:8900", "memories_key": "new-key"}`)
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/config", patchBody)
+	patchReq.Header.Set("Content-Type", "application/json")
+	pw := httptest.NewRecorder()
+	srv.ServeHTTP(pw, patchReq)
+
+	if pw.Code != http.StatusOK {
+		t.Fatalf("PATCH expected 200, got %d", pw.Code)
+	}
+
+	srv.cfgMu.RLock()
+	if srv.cfg.MemoriesURL != "http://updated:8900" {
+		t.Errorf("expected updated memories_url, got %q", srv.cfg.MemoriesURL)
+	}
+	if srv.cfg.MemoriesKey != "new-key" {
+		t.Errorf("expected updated memories_key, got %q", srv.cfg.MemoriesKey)
+	}
+	srv.cfgMu.RUnlock()
+}
+
 func TestSPAFallback(t *testing.T) {
 	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
