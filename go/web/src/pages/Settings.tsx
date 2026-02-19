@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -248,28 +249,27 @@ export default function Settings() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [isDockerEnv, setIsDockerEnv] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'unreachable'>('idle')
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [errors, setErrors] = useState<ValidationErrors>({})
   const [touched, setTouched] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    fetch('/api/config')
-      .then(r => r.json())
-      .then((data: Config) => {
-        // Normalize the Docker-internal URL for display
-        const memoriesUrl = data.memories_url?.replace('host.docker.internal', 'localhost') || data.memories_url
-        setConfig({ ...data, memories_url: memoriesUrl })
-      })
-      .catch(console.error)
+    Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/health').then(r => r.json()),
+    ]).then(([configData, healthData]) => {
+      const memoriesUrl = configData.memories_url?.replace('host.docker.internal', 'localhost') || configData.memories_url
+      setConfig({ ...configData, memories_url: memoriesUrl })
+      setIsDockerEnv(healthData.docker === true)
+    }).catch(console.error)
       .finally(() => setLoading(false))
   }, [])
 
   function updateField(key: keyof Config, value: string | number) {
     setConfig(prev => ({ ...prev, [key]: value }))
     setTouched(prev => new Set(prev).add(key))
-    setMessage(null)
   }
 
   function handleProviderChange(provider: string) {
@@ -288,7 +288,6 @@ export default function Settings() {
       next.add('llm_provider')
       return next
     })
-    setMessage(null)
     setErrors({})
   }
 
@@ -299,12 +298,11 @@ export default function Settings() {
     setTouched(new Set(['llm_provider', 'anthropic_key', 'llm_api_key', 'llm_base_url', 'fast_model', 'deep_model', 'memories_url']))
 
     if (Object.keys(validationErrors).length > 0) {
-      setMessage({ type: 'error', text: 'Please fix the errors above.' })
+      toast.error('Please fix the errors above.')
       return
     }
 
     setSaving(true)
-    setMessage(null)
     try {
       // Build a patch with only the fields we want to send
       const patch: Record<string, unknown> = {
@@ -334,9 +332,9 @@ export default function Settings() {
         body: JSON.stringify(patch),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setMessage({ type: 'success', text: 'Settings saved successfully.' })
+      toast.success('Settings saved')
     } catch (err) {
-      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save' })
+      toast.error(err instanceof Error ? err.message : 'Failed to save')
     } finally {
       setSaving(false)
     }
@@ -365,13 +363,16 @@ export default function Settings() {
       if (data.connected) {
         setConnectionStatus('connected')
         setConnectionError(null)
+        toast.success('Memories server connected')
       } else {
         setConnectionStatus('unreachable')
         setConnectionError(data.error || 'Connection failed')
+        toast.error(data.error || 'Connection failed')
       }
     } catch {
       setConnectionStatus('unreachable')
       setConnectionError('Could not reach the server')
+      toast.error('Could not reach the server')
     }
   }
 
@@ -394,6 +395,12 @@ export default function Settings() {
       <h2 className="text-2xl font-bold mb-6">Settings</h2>
 
       <div className="space-y-6 max-w-lg">
+        {isDockerEnv && (
+          <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-400">
+            Running in Docker — <code className="text-xs bg-muted px-1 rounded">localhost</code> URLs are automatically routed to your host machine.
+          </div>
+        )}
+
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-base">LLM Provider</CardTitle>
@@ -536,16 +543,9 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center gap-3">
-          <Button onClick={save} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Settings'}
-          </Button>
-          {message && (
-            <span className={message.type === 'success' ? 'text-emerald-500 text-sm' : 'text-red-400 text-sm'}>
-              {message.text}
-            </span>
-          )}
-        </div>
+        <Button onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Settings'}
+        </Button>
       </div>
     </div>
   )
