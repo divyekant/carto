@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/divyekant/carto/internal/storage"
 )
@@ -49,7 +51,15 @@ func (s *Server) handleTestMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := storage.NewMemoriesClient(req.URL, req.APIKey)
+	// When running inside Docker, rewrite localhost to host.docker.internal
+	// so the server can reach services on the host machine.
+	testURL := req.URL
+	if isDocker() {
+		testURL = strings.Replace(testURL, "localhost", "host.docker.internal", 1)
+		testURL = strings.Replace(testURL, "127.0.0.1", "host.docker.internal", 1)
+	}
+
+	client := storage.NewMemoriesClient(testURL, req.APIKey)
 	healthy, err := client.Health()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"connected": false, "error": err.Error()})
@@ -60,6 +70,12 @@ func (s *Server) handleTestMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connected": true})
+}
+
+// isDocker returns true when running inside a Docker container.
+func isDocker() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 // handleSPA serves static files from the embedded web FS and falls back to

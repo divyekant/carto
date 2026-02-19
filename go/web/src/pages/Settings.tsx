@@ -64,14 +64,15 @@ function validate(config: Config): ValidationErrors {
   }
 
   // API key validation (Anthropic uses anthropic_key, others use llm_api_key)
+  // Redacted keys (containing ****) mean the server already has one saved — that's OK.
+  // Empty keys mean nothing is configured — flag as error.
   if (provider === 'anthropic') {
-    if (!config.anthropic_key || config.anthropic_key.includes('****')) {
-      // Key is redacted or empty — only flag if truly empty (redacted means it's set on the server)
-      // We can't tell from redacted, so skip validation for redacted keys
+    if (!config.anthropic_key) {
+      errors.apiKey = 'Anthropic API key is required'
     }
   } else if (provider === 'openai') {
-    if (!config.llm_api_key || config.llm_api_key.includes('****')) {
-      // same — skip for redacted
+    if (!config.llm_api_key) {
+      errors.apiKey = 'API key is required for OpenAI'
     }
   }
   // Ollama doesn't need a key
@@ -166,7 +167,7 @@ export default function Settings() {
     const validationErrors = validate(config)
     setErrors(validationErrors)
     // Mark all fields as touched on save attempt
-    setTouched(new Set(['llm_provider', 'llm_api_key', 'llm_base_url', 'fast_model', 'deep_model', 'memories_url']))
+    setTouched(new Set(['llm_provider', 'anthropic_key', 'llm_api_key', 'llm_base_url', 'fast_model', 'deep_model', 'memories_url']))
 
     if (Object.keys(validationErrors).length > 0) {
       setMessage({ type: 'error', text: 'Please fix the errors above.' })
@@ -297,6 +298,9 @@ export default function Settings() {
                   value={config.anthropic_key || ''}
                   onChange={(e) => updateField('anthropic_key', e.target.value)}
                 />
+                {errors.apiKey && touched.has('anthropic_key') && (
+                  <p className="text-sm text-red-400">{errors.apiKey}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Supports standard keys (sk-ant-api03-) and OAuth tokens (sk-ant-oat01-)
                 </p>
