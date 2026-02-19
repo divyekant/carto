@@ -41,6 +41,9 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp["memories_healthy"] != true {
 		t.Errorf("expected memories_healthy true, got '%v'", resp["memories_healthy"])
 	}
+	if _, ok := resp["docker"]; !ok {
+		t.Error("expected docker field in health response")
+	}
 }
 
 func TestHealthEndpoint_MemoriesDown(t *testing.T) {
