@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/gitclone"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/pipeline"
@@ -277,6 +278,8 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 // indexRequest is the JSON body for POST /api/projects/index.
 type indexRequest struct {
 	Path        string `json:"path"`
+	URL         string `json:"url"`    // Git repo URL (takes precedence over path)
+	Branch      string `json:"branch"` // Optional branch
 	Incremental bool   `json:"incremental"`
 	Module      string `json:"module"`
 	Project     string `json:"project"`
@@ -291,8 +294,39 @@ func (s *Server) handleStartIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If a Git URL is provided, it takes precedence over path.
+	if req.URL != "" {
+		if !gitclone.IsGitURL(req.URL) {
+			writeError(w, http.StatusBadRequest, "invalid git URL")
+			return
+		}
+		projectName := req.Project
+		if projectName == "" {
+			projectName = gitclone.ParseRepoName(req.URL)
+		}
+
+		run := s.runs.Start(projectName)
+		if run == nil {
+			writeError(w, http.StatusConflict, "index already running for project "+projectName)
+			return
+		}
+
+		s.cfgMu.RLock()
+		cfg := s.cfg
+		s.cfgMu.RUnlock()
+
+		go s.runIndexFromURL(run, projectName, req, cfg)
+
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"project": projectName,
+			"status":  "started",
+		})
+		return
+	}
+
+	// Existing path-based logic continues below.
 	if req.Path == "" {
-		writeError(w, http.StatusBadRequest, "path is required")
+		writeError(w, http.StatusBadRequest, "path or url is required")
 		return
 	}
 
@@ -389,6 +423,37 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		Elapsed: elapsed,
 		ErrMsgs: errMsgs,
 	})
+}
+
+// runIndexFromURL clones a Git repo, runs the pipeline, then cleans up.
+func (s *Server) runIndexFromURL(run *IndexRun, projectName string, req indexRequest, cfg config.Config) {
+	run.SendLog("info", fmt.Sprintf("Cloning %s...", req.URL))
+
+	token := cfg.GitHubToken
+	cloneResult, err := gitclone.Clone(gitclone.CloneOptions{
+		URL:    req.URL,
+		Branch: req.Branch,
+		Token:  token,
+		Depth:  1,
+	})
+	if err != nil {
+		run.SendError(err.Error())
+		s.runs.Finish(projectName)
+		return
+	}
+	defer cloneResult.Cleanup()
+
+	run.SendLog("info", "Clone complete. Starting pipeline...")
+
+	localReq := indexRequest{
+		Path:        cloneResult.Dir,
+		Incremental: req.Incremental,
+		Module:      req.Module,
+		Project:     projectName,
+		URL:         req.URL,
+	}
+	// runIndex handles Finish internally via defer.
+	s.runIndex(run, projectName, cloneResult.Dir, localReq, cfg)
 }
 
 // handleProgress streams SSE events for an active indexing run.

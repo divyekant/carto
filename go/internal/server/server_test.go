@@ -357,8 +357,8 @@ func TestStartIndex_MissingPath(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["error"] != "path is required" {
-		t.Errorf("expected 'path is required' error, got %v", resp["error"])
+	if resp["error"] != "path or url is required" {
+		t.Errorf("expected 'path or url is required' error, got %v", resp["error"])
 	}
 }
 
