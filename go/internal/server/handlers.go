@@ -383,6 +383,17 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	registry := signals.NewRegistry()
 	registry.Register(signals.NewGitSignalSource(absPath))
 
+	// If we know the GitHub owner/repo, also register the GitHub signal source.
+	if owner, repo := gitclone.ParseOwnerRepo(req.URL); owner != "" {
+		ghSrc := signals.NewGitHubSignalSource()
+		ghSrc.Configure(map[string]string{
+			"owner": owner,
+			"repo":  repo,
+			"token": cfg.GitHubToken,
+		})
+		registry.Register(ghSrc)
+	}
+
 	// Create a fresh Memories client from the current config so Settings
 	// changes take effect without server restart.
 	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
