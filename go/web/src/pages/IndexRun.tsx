@@ -31,6 +31,12 @@ export default function IndexRun() {
   const [result, setResult] = useState<CompleteData | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const eventSourceRef = useRef<EventSource | null>(null)
+  const stateRef = useRef<PageState>('idle')
+
+  function setPageState(s: PageState) {
+    stateRef.current = s
+    setState(s)
+  }
 
   useEffect(() => {
     return () => {
@@ -41,7 +47,7 @@ export default function IndexRun() {
   function reset() {
     eventSourceRef.current?.close()
     eventSourceRef.current = null
-    setState('idle')
+    setPageState('idle')
     setProgress({ phase: '', done: 0, total: 0 })
     setResult(null)
     setErrorMsg('')
@@ -49,7 +55,7 @@ export default function IndexRun() {
 
   async function startIndexing() {
     if (!path.trim()) return
-    setState('starting')
+    setPageState('starting')
     setErrorMsg('')
     setResult(null)
 
@@ -71,11 +77,11 @@ export default function IndexRun() {
       const data = await res.json()
       const projectName = data.project
 
-      setState('running')
+      setPageState('running')
       connectSSE(projectName)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err))
-      setState('error')
+      setPageState('error')
     }
   }
 
@@ -91,20 +97,30 @@ export default function IndexRun() {
     es.addEventListener('complete', (e) => {
       const data: CompleteData = JSON.parse(e.data)
       setResult(data)
-      setState('complete')
+      setPageState('complete')
       es.close()
     })
 
-    es.addEventListener('error', (e) => {
+    // Pipeline errors from the backend (named "pipeline_error" to avoid
+    // collision with SSE's built-in "error" event).
+    es.addEventListener('pipeline_error', (e) => {
       if (e instanceof MessageEvent && e.data) {
         const data = JSON.parse(e.data)
-        setErrorMsg(data.message || 'Unknown error')
-      } else {
-        setErrorMsg('Connection to progress stream lost')
+        setErrorMsg(data.message || 'Unknown pipeline error')
       }
-      setState('error')
+      setPageState('error')
       es.close()
     })
+
+    // SSE connection-level errors (network failures, stream dropped).
+    es.onerror = () => {
+      // Only treat as error if we haven't already completed or received a pipeline error.
+      if (stateRef.current === 'running') {
+        setErrorMsg('Connection to progress stream lost')
+        setPageState('error')
+      }
+      es.close()
+    }
   }
 
   return (
@@ -121,10 +137,13 @@ export default function IndexRun() {
               <Label htmlFor="path">Project Path</Label>
               <Input
                 id="path"
-                placeholder="/home/user/project"
+                placeholder="/projects/my-project"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
               />
+              <p className="text-xs text-muted-foreground">
+                Path inside the container. Projects are mounted at <code className="text-xs bg-muted px-1 rounded">/projects/</code>
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="module">Module Filter (optional)</Label>

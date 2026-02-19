@@ -408,12 +408,13 @@ func TestRunManager_StartAndFinish(t *testing.T) {
 	// Finish project1.
 	mgr.Finish("project1")
 
-	// Should no longer be found.
-	if mgr.Get("project1") != nil {
-		t.Error("expected nil after finishing run")
+	// Finished run should still be accessible (for late SSE clients).
+	finishedRun := mgr.Get("project1")
+	if finishedRun == nil {
+		t.Error("expected finished run to still be accessible")
 	}
 
-	// Should be able to start project1 again.
+	// Should be able to start project1 again (replaces finished run).
 	run3 := mgr.Start("project1")
 	if run3 == nil {
 		t.Error("expected to start run after finishing")

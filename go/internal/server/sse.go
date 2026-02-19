@@ -27,8 +27,11 @@ type IndexResult struct {
 
 // IndexRun tracks a single in-flight indexing run for a project.
 type IndexRun struct {
-	events chan sseEvent
-	done   chan struct{}
+	events    chan sseEvent
+	done      chan struct{}
+	mu        sync.Mutex
+	lastEvent *sseEvent // buffered final event for late-connecting clients
+	finished  bool
 }
 
 // sseEvent is a typed SSE message sent over the events channel.
@@ -47,20 +50,29 @@ func (r *IndexRun) SendProgress(phase string, done, total int) {
 	}
 }
 
-// SendResult sends the final result event and closes the done channel.
+// SendResult sends the final result event.
 func (r *IndexRun) SendResult(result IndexResult) {
 	data, _ := json.Marshal(result)
+	ev := sseEvent{Event: "complete", Data: string(data)}
+	r.mu.Lock()
+	r.lastEvent = &ev
+	r.mu.Unlock()
 	select {
-	case r.events <- sseEvent{Event: "result", Data: string(data)}:
+	case r.events <- ev:
 	default:
 	}
 }
 
-// SendError sends an error event.
+// SendError sends a pipeline error event.
+// Uses "pipeline_error" to avoid collision with the SSE built-in "error" event.
 func (r *IndexRun) SendError(msg string) {
-	data, _ := json.Marshal(map[string]string{"error": msg})
+	data, _ := json.Marshal(map[string]string{"message": msg})
+	ev := sseEvent{Event: "pipeline_error", Data: string(data)}
+	r.mu.Lock()
+	r.lastEvent = &ev
+	r.mu.Unlock()
 	select {
-	case r.events <- sseEvent{Event: "error", Data: string(data)}:
+	case r.events <- ev:
 	default:
 	}
 }
@@ -80,6 +92,18 @@ func (r *IndexRun) WriteSSE(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// If the run already finished (late-connecting client), send the
+	// buffered final event immediately.
+	r.mu.Lock()
+	if r.finished && r.lastEvent != nil {
+		ev := *r.lastEvent
+		r.mu.Unlock()
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
+		flusher.Flush()
+		return
+	}
+	r.mu.Unlock()
+
 	ctx := req.Context()
 	for {
 		select {
@@ -87,25 +111,39 @@ func (r *IndexRun) WriteSSE(w http.ResponseWriter, req *http.Request) {
 			return
 		case ev, ok := <-r.events:
 			if !ok {
-				// Channel closed — run finished.
+				// Channel closed — run finished. Send last event if we missed it.
+				r.mu.Lock()
+				last := r.lastEvent
+				r.mu.Unlock()
+				if last != nil {
+					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", last.Event, last.Data)
+					flusher.Flush()
+				}
 				return
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
 			flusher.Flush()
 		case <-r.done:
-			// Drain remaining events then return.
+			// Drain remaining events then send last event.
 			for {
 				select {
-				case ev, ok := <-r.events:
+				case _, ok := <-r.events:
 					if !ok {
-						return
+						break
 					}
-					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
-					flusher.Flush()
+					continue
 				default:
-					return
 				}
+				break
 			}
+			r.mu.Lock()
+			last := r.lastEvent
+			r.mu.Unlock()
+			if last != nil {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", last.Event, last.Data)
+				flusher.Flush()
+			}
+			return
 		}
 	}
 }
@@ -124,13 +162,19 @@ func NewRunManager() *RunManager {
 }
 
 // Start creates a new IndexRun for the given project.
-// Returns nil if a run is already active for that project.
+// Returns nil if a run is already active (and not finished) for that project.
 func (m *RunManager) Start(project string) *IndexRun {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.runs[project]; exists {
-		return nil
+	if existing, exists := m.runs[project]; exists {
+		existing.mu.Lock()
+		done := existing.finished
+		existing.mu.Unlock()
+		if !done {
+			return nil // still running
+		}
+		// Old run finished — replace it.
 	}
 
 	run := &IndexRun{
@@ -141,16 +185,29 @@ func (m *RunManager) Start(project string) *IndexRun {
 	return run
 }
 
-// Finish marks the run as done and removes it from the active set.
+// Finish marks the run as done. The run stays in the map for 30 seconds
+// so late-connecting SSE clients can still read the final event.
 func (m *RunManager) Finish(project string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if run, exists := m.runs[project]; exists {
-		close(run.done)
-		close(run.events)
-		delete(m.runs, project)
+	run, exists := m.runs[project]
+	if !exists {
+		m.mu.Unlock()
+		return
 	}
+	run.mu.Lock()
+	run.finished = true
+	run.mu.Unlock()
+	close(run.done)
+	close(run.events)
+	m.mu.Unlock()
+
+	// Clean up after a delay so late SSE clients can still connect.
+	go func() {
+		time.Sleep(30 * time.Second)
+		m.mu.Lock()
+		delete(m.runs, project)
+		m.mu.Unlock()
+	}()
 }
 
 // Get returns the active run for a project, or nil if none is active.
