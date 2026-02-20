@@ -99,39 +99,41 @@ export default function Dashboard() {
           <Button size="sm" onClick={() => navigate('/index')}>Index Your First Project</Button>
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">Name</TableHead>
-              <TableHead className="text-xs">Path</TableHead>
-              <TableHead className="text-xs w-16">Files</TableHead>
-              <TableHead className="text-xs w-24">Last Indexed</TableHead>
-              <TableHead className="text-xs w-20">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {projects.map((p) => {
-              const run = runStatuses[p.name]
-              return (
-                <TableRow
-                  key={p.name}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
-                >
-                  <TableCell className="text-sm font-medium">{p.name}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]" title={p.path}>{p.path}</TableCell>
-                  <TableCell className="text-xs">{p.file_count}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
-                  <TableCell>
-                    {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
-                    {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}
-                    {(!run || run.status === 'complete') && <Badge variant="default" className="text-xs">Indexed</Badge>}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Name</TableHead>
+                <TableHead className="text-xs hidden sm:table-cell">Path</TableHead>
+                <TableHead className="text-xs w-16">Files</TableHead>
+                <TableHead className="text-xs w-24">Indexed</TableHead>
+                <TableHead className="text-xs w-20 hidden sm:table-cell">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map((p) => {
+                const run = runStatuses[p.name]
+                return (
+                  <TableRow
+                    key={p.name}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
+                  >
+                    <TableCell className="text-sm font-medium">{p.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:table-cell" title={p.path}>{p.path}</TableCell>
+                    <TableCell className="text-xs">{p.file_count}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
+                      {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
+                      {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}
+                      {(!run || run.status === 'complete') && <Badge variant="default" className="text-xs">Indexed</Badge>}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </div>
   )
