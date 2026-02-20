@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ProjectCard } from '@/components/ProjectCard'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 interface Project {
   name: string
@@ -26,6 +33,19 @@ interface RunStatus {
     errors: number
   }
   error?: string
+}
+
+function getTimeAgo(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d ago`
 }
 
 export default function Dashboard() {
@@ -54,47 +74,64 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+      <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-2xl font-bold">Dashboard</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {projects.length} indexed project{projects.length !== 1 ? 's' : ''}
+          <h2 className="text-lg font-semibold">Dashboard</h2>
+          <p className="text-xs text-muted-foreground">
+            {projects.length} project{projects.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {health && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Memories</span>
-              <Badge variant={health.memories_healthy ? 'default' : 'destructive'} className="text-xs">
-                {health.memories_healthy ? 'Connected' : 'Offline'}
-              </Badge>
-            </div>
+            <Badge variant={health.memories_healthy ? 'default' : 'destructive'} className="text-xs">
+              {health.memories_healthy ? 'Memories \u2713' : 'Memories \u2717'}
+            </Badge>
           )}
-          <Button onClick={() => navigate('/index')}>Index Project</Button>
+          <Button size="sm" onClick={() => navigate('/index')}>Index New</Button>
         </div>
       </div>
 
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="text-muted-foreground text-sm">Loading...</p>
       ) : projects.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-muted-foreground mb-4">No indexed projects yet.</p>
-          <Button onClick={() => navigate('/index')}>Index Your First Project</Button>
+          <p className="text-muted-foreground mb-4 text-sm">No indexed projects yet.</p>
+          <Button size="sm" onClick={() => navigate('/index')}>Index Your First Project</Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((p) => (
-            <ProjectCard
-              key={p.name}
-              name={p.name}
-              path={p.path}
-              indexedAt={p.indexed_at}
-              fileCount={p.file_count}
-              runStatus={runStatuses[p.name]}
-              onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
-            />
-          ))}
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-xs">Name</TableHead>
+              <TableHead className="text-xs">Path</TableHead>
+              <TableHead className="text-xs w-16">Files</TableHead>
+              <TableHead className="text-xs w-24">Last Indexed</TableHead>
+              <TableHead className="text-xs w-20">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {projects.map((p) => {
+              const run = runStatuses[p.name]
+              return (
+                <TableRow
+                  key={p.name}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
+                >
+                  <TableCell className="text-sm font-medium">{p.name}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]" title={p.path}>{p.path}</TableCell>
+                  <TableCell className="text-xs">{p.file_count}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
+                  <TableCell>
+                    {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
+                    {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}
+                    {(!run || run.status === 'complete') && <Badge variant="default" className="text-xs">Indexed</Badge>}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
       )}
     </div>
   )
