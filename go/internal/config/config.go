@@ -18,6 +18,12 @@ type Config struct {
 	LLMApiKey     string
 	LLMBaseURL    string
 	GitHubToken   string
+	JiraToken     string
+	JiraEmail     string
+	JiraBaseURL   string
+	LinearToken   string
+	NotionToken   string
+	SlackToken    string
 }
 
 // persistedConfig is the JSON shape written to the config file.
@@ -32,6 +38,12 @@ type persistedConfig struct {
 	LLMApiKey     string `json:"llm_api_key,omitempty"`
 	LLMBaseURL    string `json:"llm_base_url,omitempty"`
 	GitHubToken   string `json:"github_token,omitempty"`
+	JiraToken     string `json:"jira_token,omitempty"`
+	JiraEmail     string `json:"jira_email,omitempty"`
+	JiraBaseURL   string `json:"jira_base_url,omitempty"`
+	LinearToken   string `json:"linear_token,omitempty"`
+	NotionToken   string `json:"notion_token,omitempty"`
+	SlackToken    string `json:"slack_token,omitempty"`
 }
 
 // ConfigPath is the file path where UI settings are persisted.
@@ -50,6 +62,12 @@ func Load() Config {
 		LLMApiKey:     os.Getenv("LLM_API_KEY"),
 		LLMBaseURL:    os.Getenv("LLM_BASE_URL"),
 		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
+		JiraToken:     os.Getenv("JIRA_TOKEN"),
+		JiraEmail:     os.Getenv("JIRA_EMAIL"),
+		JiraBaseURL:   os.Getenv("JIRA_BASE_URL"),
+		LinearToken:   os.Getenv("LINEAR_TOKEN"),
+		NotionToken:   os.Getenv("NOTION_TOKEN"),
+		SlackToken:    os.Getenv("SLACK_TOKEN"),
 	}
 
 	// Overlay persisted settings (only non-empty values override).
@@ -78,6 +96,12 @@ func Save(cfg Config) error {
 		LLMApiKey:     cfg.LLMApiKey,
 		LLMBaseURL:    cfg.LLMBaseURL,
 		GitHubToken:   cfg.GitHubToken,
+		JiraToken:     cfg.JiraToken,
+		JiraEmail:     cfg.JiraEmail,
+		JiraBaseURL:   cfg.JiraBaseURL,
+		LinearToken:   cfg.LinearToken,
+		NotionToken:   cfg.NotionToken,
+		SlackToken:    cfg.SlackToken,
 	}
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -126,6 +150,24 @@ func mergeConfig(cfg *Config, p persistedConfig) {
 	}
 	if p.GitHubToken != "" {
 		cfg.GitHubToken = p.GitHubToken
+	}
+	if p.JiraToken != "" {
+		cfg.JiraToken = p.JiraToken
+	}
+	if p.JiraEmail != "" {
+		cfg.JiraEmail = p.JiraEmail
+	}
+	if p.JiraBaseURL != "" {
+		cfg.JiraBaseURL = p.JiraBaseURL
+	}
+	if p.LinearToken != "" {
+		cfg.LinearToken = p.LinearToken
+	}
+	if p.NotionToken != "" {
+		cfg.NotionToken = p.NotionToken
+	}
+	if p.SlackToken != "" {
+		cfg.SlackToken = p.SlackToken
 	}
 }
 
