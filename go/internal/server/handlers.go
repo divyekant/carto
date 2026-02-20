@@ -670,6 +670,92 @@ func (s *Server) handlePutSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
+// projectDetailResponse is the JSON shape returned by GET /api/projects/{name}.
+type projectDetailResponse struct {
+	Name      string   `json:"name"`
+	Path      string   `json:"path"`
+	FileCount int      `json:"file_count"`
+	IndexedAt string   `json:"indexed_at"`
+	Sources   []string `json:"sources"`
+}
+
+// handleGetProject returns detailed info for a single project by reading its
+// manifest and sources config.
+func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	projPath := filepath.Join(s.projectsDir, name)
+
+	if info, err := os.Stat(projPath); err != nil || !info.IsDir() {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	mf, err := manifest.Load(projPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load manifest: "+err.Error())
+		return
+	}
+	if mf.IsEmpty() && mf.Project == "" {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	// Collect source names from sources.yaml.
+	var sourceNames []string
+	yamlCfg, _ := sources.LoadSourcesConfig(projPath)
+	if yamlCfg != nil {
+		for srcName := range yamlCfg.Sources {
+			sourceNames = append(sourceNames, srcName)
+		}
+		sort.Strings(sourceNames)
+	}
+	if sourceNames == nil {
+		sourceNames = []string{}
+	}
+
+	indexedAt := ""
+	if !mf.IndexedAt.IsZero() {
+		indexedAt = mf.IndexedAt.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, projectDetailResponse{
+		Name:      mf.Project,
+		Path:      projPath,
+		FileCount: len(mf.Files),
+		IndexedAt: indexedAt,
+		Sources:   sourceNames,
+	})
+}
+
+// handleDeleteProject removes the .carto/ directory for a project.
+func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cartoDir := filepath.Join(s.projectsDir, name, ".carto")
+
+	if _, err := os.Stat(cartoDir); os.IsNotExist(err) {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	if err := os.RemoveAll(cartoDir); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleIndexAll accepts a POST to re-index all projects. For now it returns
+// 202 Accepted with the changed_only flag parsed from the query string.
+func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
+	changedOnly := r.URL.Query().Get("changed") == "true"
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":       "started",
+		"changed_only": changedOnly,
+	})
+}
+
 // sourcesResponse is the JSON shape returned by GET /api/projects/{name}/sources.
 type sourcesResponse struct {
 	Sources     map[string]map[string]string `json:"sources"`

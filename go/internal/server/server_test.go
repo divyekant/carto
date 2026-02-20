@@ -681,3 +681,151 @@ func TestPutProjectSources_EmptyDeletesFile(t *testing.T) {
 		t.Error("expected sources.yaml to be deleted for empty sources")
 	}
 }
+
+func TestGetProjectDetail(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	os.MkdirAll(filepath.Join(projDir, ".carto"), 0o755)
+
+	// Write a manifest.
+	mf := map[string]any{
+		"version":    "1.0",
+		"project":    "myproj",
+		"indexed_at": time.Now().Format(time.RFC3339),
+		"files": map[string]any{
+			"main.go": map[string]any{"hash": "abc", "size": 100, "indexed_at": time.Now().Format(time.RFC3339)},
+			"util.go": map[string]any{"hash": "def", "size": 200, "indexed_at": time.Now().Format(time.RFC3339)},
+		},
+	}
+	mfData, _ := json.Marshal(mf)
+	os.WriteFile(filepath.Join(projDir, ".carto", "manifest.json"), mfData, 0o644)
+
+	// Write a sources.yaml.
+	yamlData := []byte("sources:\n  github:\n    owner: acme\n  jira:\n    project: PROJ\n")
+	os.WriteFile(filepath.Join(projDir, ".carto", "sources.yaml"), yamlData, 0o644)
+
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("GET", "/api/projects/myproj", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["name"] != "myproj" {
+		t.Errorf("expected name 'myproj', got %v", resp["name"])
+	}
+	if resp["file_count"] != float64(2) {
+		t.Errorf("expected file_count 2, got %v", resp["file_count"])
+	}
+	if resp["indexed_at"] == "" {
+		t.Error("expected non-empty indexed_at")
+	}
+
+	srcs, ok := resp["sources"].([]any)
+	if !ok {
+		t.Fatalf("expected sources array, got %T", resp["sources"])
+	}
+	if len(srcs) != 2 {
+		t.Errorf("expected 2 sources, got %d", len(srcs))
+	}
+}
+
+func TestGetProjectDetail_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("GET", "/api/projects/nonexistent", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteProject(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	cartoDir := filepath.Join(projDir, ".carto")
+	os.MkdirAll(cartoDir, 0o755)
+	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"1.0"}`), 0o644)
+
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("DELETE", "/api/projects/myproj", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "deleted" {
+		t.Errorf("expected status 'deleted', got %v", resp["status"])
+	}
+
+	// .carto/ should be gone.
+	if _, err := os.Stat(cartoDir); !os.IsNotExist(err) {
+		t.Error("expected .carto/ directory to be removed")
+	}
+}
+
+func TestDeleteProject_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("DELETE", "/api/projects/nonexistent", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIndexAll(t *testing.T) {
+	srv := New(config.Config{}, nil, "", nil)
+
+	req := httptest.NewRequest("POST", "/api/projects/index-all?changed=true", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "started" {
+		t.Errorf("expected status 'started', got %v", resp["status"])
+	}
+	if resp["changed_only"] != true {
+		t.Errorf("expected changed_only true, got %v", resp["changed_only"])
+	}
+}
+
+func TestIndexAll_NoChangedParam(t *testing.T) {
+	srv := New(config.Config{}, nil, "", nil)
+
+	req := httptest.NewRequest("POST", "/api/projects/index-all", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["changed_only"] != false {
+		t.Errorf("expected changed_only false, got %v", resp["changed_only"])
+	}
+}

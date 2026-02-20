@@ -17,10 +17,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("PATCH /api/config", s.handlePatchConfig)
 	s.mux.HandleFunc("POST /api/projects/index", s.handleStartIndex)
+	s.mux.HandleFunc("POST /api/projects/index-all", s.handleIndexAll)
 	s.mux.HandleFunc("GET /api/projects/{name}/progress", s.handleProgress)
 	s.mux.HandleFunc("POST /api/test-memories", s.handleTestMemories)
 	s.mux.HandleFunc("GET /api/projects/runs", s.handleListRuns)
 	s.mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	s.mux.HandleFunc("GET /api/projects/{name}", s.handleGetProject)
+	s.mux.HandleFunc("DELETE /api/projects/{name}", s.handleDeleteProject)
 	s.mux.HandleFunc("GET /api/projects/{name}/sources", s.handleGetSources)
 	s.mux.HandleFunc("PUT /api/projects/{name}/sources", s.handlePutSources)
 
