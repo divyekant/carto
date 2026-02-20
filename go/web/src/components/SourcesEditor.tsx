@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 
 interface SourceDef {
   key: string
@@ -138,7 +139,7 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading sources...</p>
+    return <p className="text-xs text-muted-foreground">Loading sources...</p>
   }
 
   function credStatus(def: SourceDef): 'ok' | 'missing' | 'na' {
@@ -147,23 +148,18 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-1">
       {SOURCE_DEFS.map(def => {
         const isEnabled = enabled[def.key] || false
         const cred = credStatus(def)
         const settings = sources[def.key] || {}
 
         return (
-          <div key={def.key} className="border border-border rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
+          <div key={def.key} className="border border-border rounded-md p-2">
+            <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => toggleSource(def.key)}
-                  className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}
-                >
-                  <span className={`block w-3.5 h-3.5 rounded-full bg-white absolute top-[3px] transition-transform ${isEnabled ? 'translate-x-[18px]' : 'translate-x-[2px]'}`} />
-                </button>
-                <span className="font-medium text-sm">{def.label}</span>
+                <Switch checked={isEnabled} onCheckedChange={() => toggleSource(def.key)} />
+                <span className="font-medium text-xs">{def.label}</span>
               </div>
               {cred === 'ok' && <Badge variant="default" className="text-xs">Token configured</Badge>}
               {cred === 'missing' && (
@@ -174,14 +170,15 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
             </div>
 
             {isEnabled && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
                 {def.fields.map(field => (
-                  <div key={field.key} className="space-y-1">
+                  <div key={field.key} className="space-y-0.5">
                     <Label className="text-xs">{field.label}</Label>
                     <Input
                       placeholder={field.placeholder}
                       value={settings[field.key] || ''}
                       onChange={e => updateField(def.key, field.key, e.target.value)}
+                      className="h-7 text-xs"
                     />
                   </div>
                 ))}
@@ -191,7 +188,7 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
         )
       })}
 
-      <Button onClick={save} disabled={saving}>
+      <Button size="sm" onClick={save} disabled={saving} className="mt-2">
         {saving ? 'Saving...' : 'Save Sources'}
       </Button>
     </div>
