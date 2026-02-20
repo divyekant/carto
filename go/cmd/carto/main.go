@@ -45,12 +45,18 @@ func main() {
 		Version: version,
 	}
 
+	root.PersistentFlags().Bool("json", false, "Output machine-readable JSON")
+	root.PersistentFlags().BoolP("quiet", "q", false, "Suppress progress spinners, only output result")
+
 	root.AddCommand(indexCmd())
 	root.AddCommand(queryCmd())
 	root.AddCommand(modulesCmd())
 	root.AddCommand(patternsCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(serveCmd())
+	root.AddCommand(projectsCmd())
+	root.AddCommand(sourcesCmd())
+	root.AddCommand(configCmdGroup())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -539,4 +545,493 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// writeOutput renders data as JSON (if --json flag is set) or invokes
+// the human-readable callback.
+func writeOutput(cmd *cobra.Command, data any, humanFn func()) {
+	jsonMode, _ := cmd.Flags().GetBool("json")
+	if jsonMode {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(data)
+		return
+	}
+	humanFn()
+}
+
+// --------------------------------------------------------------------------
+// projects
+// --------------------------------------------------------------------------
+
+func projectsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "projects",
+		Short: "Manage indexed projects",
+	}
+	cmd.AddCommand(projectsListCmd())
+	cmd.AddCommand(projectsShowCmd())
+	cmd.AddCommand(projectsDeleteCmd())
+	return cmd
+}
+
+func projectsListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List all indexed projects",
+		RunE:  runProjectsList,
+	}
+}
+
+func runProjectsList(cmd *cobra.Command, args []string) error {
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return fmt.Errorf("read projects dir: %w", err)
+	}
+
+	type projectInfo struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		Files     int    `json:"files"`
+		IndexedAt string `json:"indexed_at"`
+	}
+
+	var projects []projectInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectPath := filepath.Join(projectsDir, entry.Name())
+		mf, err := manifest.Load(projectPath)
+		if err != nil || mf.IsEmpty() {
+			continue
+		}
+		name := mf.Project
+		if name == "" {
+			name = entry.Name()
+		}
+		projects = append(projects, projectInfo{
+			Name:      name,
+			Path:      projectPath,
+			Files:     len(mf.Files),
+			IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeOutput(cmd, projects, func() {
+		if len(projects) == 0 {
+			fmt.Println("No indexed projects found.")
+			return
+		}
+		fmt.Printf("%s%sIndexed projects%s\n\n", bold, cyan, reset)
+		fmt.Printf("  %-25s %-8s %s\n", "NAME", "FILES", "INDEXED AT")
+		fmt.Printf("  %-25s %-8s %s\n",
+			strings.Repeat("-", 25),
+			strings.Repeat("-", 8),
+			strings.Repeat("-", 20))
+		for _, p := range projects {
+			fmt.Printf("  %-25s %-8d %s\n", p.Name, p.Files, p.IndexedAt)
+		}
+		fmt.Printf("\n  %sTotal:%s %d project(s)\n", bold, reset, len(projects))
+	})
+	return nil
+}
+
+func projectsShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <name>",
+		Short: "Show details of an indexed project",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runProjectsShow,
+	}
+}
+
+func runProjectsShow(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	projectPath := filepath.Join(projectsDir, name)
+	mf, err := manifest.Load(projectPath)
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+	if mf.IsEmpty() {
+		return fmt.Errorf("project %q not found or has no index", name)
+	}
+
+	// Calculate total size.
+	var totalSize int64
+	for _, entry := range mf.Files {
+		totalSize += entry.Size
+	}
+
+	// Load sources config if present.
+	srcCfg, _ := sources.LoadSourcesConfig(projectPath)
+	var sourceNames []string
+	if srcCfg != nil {
+		for k := range srcCfg.Sources {
+			sourceNames = append(sourceNames, k)
+		}
+	}
+
+	type showData struct {
+		Name      string   `json:"name"`
+		Path      string   `json:"path"`
+		Files     int      `json:"files"`
+		TotalSize string   `json:"total_size"`
+		IndexedAt string   `json:"indexed_at"`
+		Sources   []string `json:"sources,omitempty"`
+	}
+
+	data := showData{
+		Name:      mf.Project,
+		Path:      projectPath,
+		Files:     len(mf.Files),
+		TotalSize: formatBytes(totalSize),
+		IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+		Sources:   sourceNames,
+	}
+
+	writeOutput(cmd, data, func() {
+		fmt.Printf("%s%sProject: %s%s\n\n", bold, cyan, data.Name, reset)
+		fmt.Printf("  %sPath:%s        %s\n", cyan, reset, data.Path)
+		fmt.Printf("  %sFiles:%s       %d\n", cyan, reset, data.Files)
+		fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, data.TotalSize)
+		fmt.Printf("  %sIndexed at:%s  %s\n", cyan, reset, data.IndexedAt)
+		if len(data.Sources) > 0 {
+			fmt.Printf("  %sSources:%s     %s\n", cyan, reset, strings.Join(data.Sources, ", "))
+		}
+	})
+	return nil
+}
+
+func projectsDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a project's .carto directory",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runProjectsDelete,
+	}
+}
+
+func runProjectsDelete(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	cartoDir := filepath.Join(projectsDir, name, ".carto")
+	info, err := os.Stat(cartoDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("project %q has no .carto directory", name)
+	}
+
+	if err := os.RemoveAll(cartoDir); err != nil {
+		return fmt.Errorf("delete .carto: %w", err)
+	}
+
+	type deleteResult struct {
+		Name    string `json:"name"`
+		Deleted bool   `json:"deleted"`
+	}
+
+	writeOutput(cmd, deleteResult{Name: name, Deleted: true}, func() {
+		fmt.Printf("%s✓%s Deleted .carto directory for project %q\n", green, reset, name)
+	})
+	return nil
+}
+
+// --------------------------------------------------------------------------
+// sources
+// --------------------------------------------------------------------------
+
+func sourcesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sources",
+		Short: "Manage project source configurations",
+	}
+	cmd.AddCommand(sourcesListCmd())
+	cmd.AddCommand(sourcesSetCmd())
+	cmd.AddCommand(sourcesRmCmd())
+	return cmd
+}
+
+func sourcesListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list <project>",
+		Short: "List configured sources for a project",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSourcesList,
+	}
+}
+
+func runSourcesList(cmd *cobra.Command, args []string) error {
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	projectPath := filepath.Join(projectsDir, args[0])
+	srcCfg, err := sources.LoadSourcesConfig(projectPath)
+	if err != nil {
+		return fmt.Errorf("load sources: %w", err)
+	}
+
+	if srcCfg == nil || len(srcCfg.Sources) == 0 {
+		writeOutput(cmd, map[string]interface{}{"sources": map[string]interface{}{}}, func() {
+			fmt.Println("No sources configured.")
+		})
+		return nil
+	}
+
+	// Build a JSON-friendly representation.
+	type sourceDetail struct {
+		Type     string            `json:"type"`
+		Settings map[string]string `json:"settings,omitempty"`
+	}
+	var details []sourceDetail
+	for name, entry := range srcCfg.Sources {
+		details = append(details, sourceDetail{
+			Type:     name,
+			Settings: entry.Settings,
+		})
+	}
+
+	writeOutput(cmd, details, func() {
+		fmt.Printf("%s%sSources for %s%s\n\n", bold, cyan, args[0], reset)
+		for name, entry := range srcCfg.Sources {
+			fmt.Printf("  %s%s%s\n", bold, name, reset)
+			for k, v := range entry.Settings {
+				fmt.Printf("    %s: %s\n", k, v)
+			}
+			for k, vals := range entry.ListSettings {
+				fmt.Printf("    %s: [%s]\n", k, strings.Join(vals, ", "))
+			}
+		}
+	})
+	return nil
+}
+
+func sourcesSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <project> <type> [key=value ...]",
+		Short: "Set or update a source for a project",
+		Args:  cobra.MinimumNArgs(2),
+		RunE:  runSourcesSet,
+	}
+}
+
+func runSourcesSet(cmd *cobra.Command, args []string) error {
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	projectName := args[0]
+	sourceType := args[1]
+
+	projectPath := filepath.Join(projectsDir, projectName)
+	srcCfg, err := sources.LoadSourcesConfig(projectPath)
+	if err != nil {
+		return fmt.Errorf("load sources: %w", err)
+	}
+	if srcCfg == nil {
+		srcCfg = &sources.SourcesYAML{
+			Sources: make(map[string]sources.SourceEntry),
+		}
+	}
+
+	// Get or create the entry.
+	entry, exists := srcCfg.Sources[sourceType]
+	if !exists {
+		entry = sources.SourceEntry{
+			Settings:     make(map[string]string),
+			ListSettings: make(map[string][]string),
+			Raw:          make(map[string]interface{}),
+		}
+	}
+	if entry.Settings == nil {
+		entry.Settings = make(map[string]string)
+	}
+
+	// Parse key=value pairs from remaining args.
+	for _, kv := range args[2:] {
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid key=value pair: %q", kv)
+		}
+		entry.Settings[parts[0]] = parts[1]
+	}
+
+	srcCfg.Sources[sourceType] = entry
+	if err := sources.SaveSourcesConfig(projectPath, srcCfg); err != nil {
+		return fmt.Errorf("save sources: %w", err)
+	}
+
+	writeOutput(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "updated"}, func() {
+		fmt.Printf("%s✓%s Source %q updated for project %q\n", green, reset, sourceType, projectName)
+	})
+	return nil
+}
+
+func sourcesRmCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rm <project> <type>",
+		Short: "Remove a source from a project",
+		Args:  cobra.ExactArgs(2),
+		RunE:  runSourcesRm,
+	}
+}
+
+func runSourcesRm(cmd *cobra.Command, args []string) error {
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	projectName := args[0]
+	sourceType := args[1]
+
+	projectPath := filepath.Join(projectsDir, projectName)
+	srcCfg, err := sources.LoadSourcesConfig(projectPath)
+	if err != nil {
+		return fmt.Errorf("load sources: %w", err)
+	}
+	if srcCfg == nil || len(srcCfg.Sources) == 0 {
+		return fmt.Errorf("no sources configured for project %q", projectName)
+	}
+
+	if _, exists := srcCfg.Sources[sourceType]; !exists {
+		return fmt.Errorf("source %q not found for project %q", sourceType, projectName)
+	}
+
+	delete(srcCfg.Sources, sourceType)
+	if err := sources.SaveSourcesConfig(projectPath, srcCfg); err != nil {
+		return fmt.Errorf("save sources: %w", err)
+	}
+
+	writeOutput(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "removed"}, func() {
+		fmt.Printf("%s✓%s Source %q removed from project %q\n", green, reset, sourceType, projectName)
+	})
+	return nil
+}
+
+// --------------------------------------------------------------------------
+// config
+// --------------------------------------------------------------------------
+
+func configCmdGroup() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "View and update Carto configuration",
+	}
+	cmd.AddCommand(configGetCmd())
+	cmd.AddCommand(configSetCmd())
+	return cmd
+}
+
+func configGetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get [key]",
+		Short: "Show configuration values",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runConfigGet,
+	}
+}
+
+func runConfigGet(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+
+	// Non-sensitive config fields for display.
+	configMap := map[string]string{
+		"memories_url":   cfg.MemoriesURL,
+		"fast_model":     cfg.FastModel,
+		"deep_model":     cfg.DeepModel,
+		"max_concurrent": fmt.Sprintf("%d", cfg.MaxConcurrent),
+		"llm_provider":   cfg.LLMProvider,
+		"llm_base_url":   cfg.LLMBaseURL,
+	}
+
+	if len(args) == 1 {
+		key := args[0]
+		val, ok := configMap[key]
+		if !ok {
+			return fmt.Errorf("unknown config key: %q", key)
+		}
+		writeOutput(cmd, map[string]string{key: val}, func() {
+			fmt.Printf("%s: %s\n", key, val)
+		})
+		return nil
+	}
+
+	writeOutput(cmd, configMap, func() {
+		fmt.Printf("%s%sConfiguration%s\n\n", bold, cyan, reset)
+		// Print keys in a stable order.
+		orderedKeys := []string{
+			"memories_url", "fast_model", "deep_model",
+			"max_concurrent", "llm_provider", "llm_base_url",
+		}
+		for _, k := range orderedKeys {
+			v := configMap[k]
+			if v == "" {
+				v = "(not set)"
+			}
+			fmt.Printf("  %-18s %s\n", k, v)
+		}
+	})
+	return nil
+}
+
+func configSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set a configuration value",
+		Args:  cobra.ExactArgs(2),
+		RunE:  runConfigSet,
+	}
+}
+
+func runConfigSet(cmd *cobra.Command, args []string) error {
+	key := args[0]
+	value := args[1]
+
+	cfg := config.Load()
+
+	switch key {
+	case "memories_url":
+		cfg.MemoriesURL = value
+	case "fast_model":
+		cfg.FastModel = value
+	case "deep_model":
+		cfg.DeepModel = value
+	case "max_concurrent":
+		n, err := fmt.Sscanf(value, "%d", &cfg.MaxConcurrent)
+		if n != 1 || err != nil {
+			return fmt.Errorf("max_concurrent must be an integer")
+		}
+	case "llm_provider":
+		cfg.LLMProvider = value
+	case "llm_base_url":
+		cfg.LLMBaseURL = value
+	default:
+		return fmt.Errorf("unknown or read-only config key: %q", key)
+	}
+
+	if err := config.Save(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	writeOutput(cmd, map[string]string{key: value, "status": "saved"}, func() {
+		fmt.Printf("%s✓%s Set %s = %s\n", green, reset, key, value)
+	})
+	return nil
 }
