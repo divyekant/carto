@@ -4,10 +4,10 @@ import { cn } from '@/lib/utils'
 import { useTheme } from './ThemeProvider'
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: '\u25EB' },
-  { to: '/index', label: 'Index', icon: '\u27F3' },
-  { to: '/query', label: 'Query', icon: '\u2315' },
-  { to: '/settings', label: 'Settings', icon: '\u2699' },
+  { to: '/', label: 'Dashboard', icon: '◫' },
+  { to: '/index', label: 'Index', icon: '⟳' },
+  { to: '/query', label: 'Query', icon: '⌕' },
+  { to: '/settings', label: 'Settings', icon: '⚙' },
 ]
 
 function ThemeToggle() {
@@ -72,18 +72,20 @@ export function Layout() {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — icon-only, expand on hover */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-56 border-r border-border bg-sidebar flex flex-col transition-transform duration-200 md:static md:translate-x-0',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+          'fixed inset-y-0 left-0 z-50 border-r border-border bg-sidebar flex flex-col transition-all duration-200 overflow-hidden',
+          'w-12 hover:w-48 group/sidebar',
+          'hidden md:flex',
+          mobileOpen && 'flex w-48'
         )}
       >
-        <div className="p-4 border-b border-border">
-          <h1 className="text-xl font-bold tracking-tight text-primary">Carto</h1>
-          <p className="text-xs text-muted-foreground">Codebase Intelligence</p>
+        <div className="p-2 border-b border-border h-12 flex items-center">
+          <span className="text-lg font-bold text-primary shrink-0">C</span>
+          <span className="ml-1 text-sm font-bold text-primary opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap">arto</span>
         </div>
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-1 space-y-0.5">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -92,25 +94,27 @@ export function Layout() {
               onClick={() => setMobileOpen(false)}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
+                  'flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-colors',
                   isActive
-                    ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                    ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                 )
               }
             >
-              <span className="text-base">{item.icon}</span>
-              {item.label}
+              <span className="text-base shrink-0">{item.icon}</span>
+              <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap text-xs">
+                {item.label}
+              </span>
             </NavLink>
           ))}
         </nav>
-        <div className="p-2 border-t border-border hidden md:block">
+        <div className="p-1 border-t border-border">
           <ThemeToggle />
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto p-4 pt-16 md:p-6 md:pt-6">
+      {/* Main content — leave room for icon sidebar */}
+      <main className="flex-1 overflow-y-auto p-3 pt-14 md:p-5 md:pt-5 md:ml-12">
         <Outlet />
       </main>
     </div>
