@@ -416,29 +416,21 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		BaseURL:       cfg.LLMBaseURL,
 	})
 
-	// Build unified source registry.
-	srcRegistry := sources.NewRegistry()
-	srcRegistry.Register(sources.NewGitSource(absPath))
-
-	// If we know the GitHub owner/repo, also register the GitHub source.
-	if owner, repo := gitclone.ParseOwnerRepo(req.URL); owner != "" {
-		ghSrc := sources.NewGitHubSource()
-		ghSrc.Configure(sources.SourceConfig{
-			Settings:    map[string]string{"owner": owner, "repo": repo},
-			Credentials: map[string]string{"github_token": cfg.GitHubToken},
-		})
-		srcRegistry.Register(ghSrc)
-	}
-
-	// Set up PDF knowledge source if a docs/ directory exists in the project.
-	docsDir := filepath.Join(absPath, "docs")
-	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
-		pdfSrc := sources.NewPDFSource()
-		pdfSrc.Configure(sources.SourceConfig{
-			Settings: map[string]string{"dir": docsDir},
-		})
-		srcRegistry.Register(pdfSrc)
-	}
+	// Build unified source registry from .carto/sources.yaml (if present)
+	// and auto-detected sources (git, GitHub, PDFs).
+	yamlCfg, _ := sources.LoadSourcesConfig(absPath)
+	owner, repo := gitclone.ParseOwnerRepo(req.URL)
+	srcRegistry := sources.BuildRegistry(absPath, yamlCfg, sources.Credentials{
+		GitHubToken: cfg.GitHubToken,
+		GitHubOwner: owner,
+		GitHubRepo:  repo,
+		JiraToken:   cfg.JiraToken,
+		JiraEmail:   cfg.JiraEmail,
+		JiraBaseURL: cfg.JiraBaseURL,
+		LinearToken: cfg.LinearToken,
+		NotionToken: cfg.NotionToken,
+		SlackToken:  cfg.SlackToken,
+	})
 
 	// Create a fresh Memories client from the current config so Settings
 	// changes take effect without server restart.

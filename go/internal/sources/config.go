@@ -85,8 +85,11 @@ func LoadSourcesConfig(rootPath string) (*SourcesYAML, error) {
 // Credentials holds all integration tokens/keys from config or environment.
 type Credentials struct {
 	GitHubToken string
+	GitHubOwner string // auto-detected from git URL
+	GitHubRepo  string // auto-detected from git URL
 	JiraToken   string
 	JiraEmail   string
+	JiraBaseURL string
 	LinearToken string
 	NotionToken string
 	SlackToken  string
@@ -229,8 +232,21 @@ func mapYAMLKeys(name string, settings map[string]string) {
 }
 
 // autoDetectSources registers sources based on available credentials
-// when no YAML config is present.
+// when no YAML config is present. Sources that require project-specific
+// settings (Jira project_key, Linear team_key, Notion database_id,
+// Slack channel_id, Web urls) can only be configured via .carto/sources.yaml.
 func autoDetectSources(reg *Registry, rootPath string, creds Credentials) {
+	// GitHub: register if owner/repo are available (parsed from git URL).
+	if creds.GitHubOwner != "" && creds.GitHubRepo != "" {
+		ghSrc := NewGitHubSource()
+		if err := ghSrc.Configure(SourceConfig{
+			Settings:    map[string]string{"owner": creds.GitHubOwner, "repo": creds.GitHubRepo},
+			Credentials: buildCredentials("github", creds),
+		}); err == nil {
+			reg.Register(ghSrc)
+		}
+	}
+
 	// Auto-detect PDF docs directory.
 	docsDir := filepath.Join(rootPath, "docs")
 	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
@@ -241,4 +257,8 @@ func autoDetectSources(reg *Registry, rootPath string, creds Credentials) {
 			reg.Register(pdfSrc)
 		}
 	}
+
+	// NOTE: Jira, Linear, Notion, Slack, and Web require project-specific
+	// settings (project_key, team_key, database_id, channel_id, urls) that
+	// cannot be auto-detected. Use .carto/sources.yaml to configure them.
 }

@@ -260,4 +260,29 @@ func TestAutoDetectSources(t *testing.T) {
 	if len(names) != 1 || names[0] != "local-pdf" {
 		t.Errorf("expected [local-pdf], got %v", names)
 	}
+
+	// With GitHub owner/repo — should also register github.
+	reg3 := NewRegistry()
+	autoDetectSources(reg3, dir, Credentials{
+		GitHubOwner: "test-owner",
+		GitHubRepo:  "test-repo",
+		GitHubToken: "ghp_test",
+	})
+	names3 := reg3.SourceNames()
+	hasGH := false
+	hasPDF := false
+	for _, n := range names3 {
+		if n == "github" {
+			hasGH = true
+		}
+		if n == "local-pdf" {
+			hasPDF = true
+		}
+	}
+	if !hasGH {
+		t.Errorf("expected github in auto-detected sources, got %v", names3)
+	}
+	if !hasPDF {
+		t.Errorf("expected local-pdf in auto-detected sources (docs/ exists), got %v", names3)
+	}
 }
