@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { FolderPicker } from '@/components/FolderPicker'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { ProgressBar } from '@/components/ProgressBar'
 
 type PageState = 'idle' | 'starting' | 'running' | 'complete' | 'error'
@@ -55,15 +55,12 @@ export default function IndexRun() {
     setState(s)
   }
 
-  // Auto-scroll logs to bottom
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
   useEffect(() => {
-    return () => {
-      eventSourceRef.current?.close()
-    }
+    return () => { eventSourceRef.current?.close() }
   }, [])
 
   useEffect(() => {
@@ -71,7 +68,6 @@ export default function IndexRun() {
     if (urlPath) setPath(urlPath)
   }, [searchParams])
 
-  // Check for active/completed runs on mount so navigating away doesn't lose state
   useEffect(() => {
     fetch('/api/projects/runs')
       .then(r => r.json())
@@ -91,7 +87,7 @@ export default function IndexRun() {
           }
         }
       })
-      .catch(() => {}) // Silently ignore if endpoint not available
+      .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -170,8 +166,6 @@ export default function IndexRun() {
       es.close()
     })
 
-    // Pipeline errors from the backend (named "pipeline_error" to avoid
-    // collision with SSE's built-in "error" event).
     es.addEventListener('pipeline_error', (e) => {
       if (e instanceof MessageEvent && e.data) {
         const data = JSON.parse(e.data)
@@ -184,7 +178,6 @@ export default function IndexRun() {
       es.close()
     })
 
-    // SSE connection-level errors (network failures, stream dropped).
     es.onerror = () => {
       if (stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
@@ -197,56 +190,52 @@ export default function IndexRun() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Index Project</h2>
+      <h2 className="text-lg font-semibold mb-3">Index Project</h2>
 
       {state === 'idle' && (
-        <Card className="bg-card border-border max-w-lg">
-          <CardHeader>
-            <CardTitle className="text-base">Start Indexing</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Tab toggle */}
-            <div className="flex gap-1 p-1 bg-muted rounded-lg">
-              <button
-                className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInputMode('local')}
-              >
-                Local Path
-              </button>
-              <button
-                className={`flex-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInputMode('git')}
-              >
-                Git URL
-              </button>
-            </div>
+        <div className="space-y-3">
+          {/* Tab toggle */}
+          <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+            <button
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setInputMode('local')}
+            >
+              Local Path
+            </button>
+            <button
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setInputMode('git')}
+            >
+              Git URL
+            </button>
+          </div>
 
+          {/* Single-row form */}
+          <div className="flex items-end gap-3 flex-wrap">
             {inputMode === 'local' && (
-              <div className="space-y-2">
-                <Label>Project Path</Label>
+              <div className="flex-1 min-w-[200px]">
+                <Label className="text-xs mb-1 block">Project Path</Label>
                 <FolderPicker value={path} onChange={setPath} />
               </div>
             )}
 
             {inputMode === 'git' && (
               <>
-                <div className="space-y-2">
-                  <Label htmlFor="gitUrl">Repository URL</Label>
+                <div className="flex-1 min-w-[200px]">
+                  <Label className="text-xs mb-1 block">Repository URL</Label>
                   <Input
-                    id="gitUrl"
                     placeholder="https://github.com/user/repo"
                     value={gitUrl}
                     onChange={(e) => setGitUrl(e.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="branch">Branch (optional)</Label>
+                <div className="w-32">
+                  <Label className="text-xs mb-1 block">Branch</Label>
                   <Input
-                    id="branch"
                     placeholder="main"
                     value={branch}
                     onChange={(e) => setBranch(e.target.value)}
@@ -255,156 +244,125 @@ export default function IndexRun() {
               </>
             )}
 
-            {/* Module filter and incremental checkbox */}
-            <div className="space-y-2">
-              <Label htmlFor="module">Module Filter (optional)</Label>
+            <div className="w-36">
+              <Label className="text-xs mb-1 block">Module (opt.)</Label>
               <Input
-                id="module"
-                placeholder="e.g. go, symbols"
+                placeholder="e.g. go"
                 value={module}
                 onChange={(e) => setModule(e.target.value)}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="incremental"
-                checked={incremental}
-                onChange={(e) => setIncremental(e.target.checked)}
-                className="rounded border-border"
-              />
-              <Label htmlFor="incremental">Incremental</Label>
+
+            <div className="flex items-center gap-2 pb-1">
+              <Switch checked={incremental} onCheckedChange={setIncremental} id="incremental" />
+              <Label htmlFor="incremental" className="text-xs">Incremental</Label>
             </div>
-            <Button onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
-              Start Indexing
+
+            <Button size="sm" onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
+              Start
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {state === 'starting' && (
-        <Card className="bg-card border-border max-w-lg">
-          <CardContent className="pt-6">
-            <p className="text-muted-foreground">Starting indexing...</p>
-          </CardContent>
-        </Card>
+        <p className="text-muted-foreground text-sm">Starting indexing...</p>
       )}
 
       {(state === 'running' || state === 'complete' || state === 'error') && (
-        <div className="space-y-4 max-w-2xl">
-          {state === 'running' && (
-            <Card className="bg-card border-border">
-              <CardHeader>
-                <CardTitle className="text-base">Indexing in Progress</CardTitle>
-              </CardHeader>
-              <CardContent>
+        <div className="space-y-3">
+          <div className="flex gap-3">
+            {/* Left: progress / result */}
+            <div className="flex-1 min-w-0">
+              {state === 'running' && (
                 <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
-              </CardContent>
-            </Card>
-          )}
+              )}
 
-          {state === 'complete' && result && (
-            <Card className="bg-card border-border">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-base">Indexing Complete</CardTitle>
-                  <Badge variant="default" className="text-xs">Done</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Modules</span>
-                    <p className="text-foreground font-medium">{result.modules}</p>
+              {state === 'complete' && result && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="default" className="text-xs">Done</Badge>
+                    <span className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</span>
                   </div>
-                  <div>
-                    <span className="text-muted-foreground">Files</span>
-                    <p className="text-foreground font-medium">{result.files}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Atoms</span>
-                    <p className="text-foreground font-medium">{result.atoms}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Errors</span>
-                    <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'text-foreground font-medium'}>
-                      {result.errors}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</p>
-                {result.errors > 0 && result.error_messages && result.error_messages.length > 0 && (
-                  <div className="border-t border-border pt-3">
-                    <button
-                      onClick={() => setErrorsExpanded(!errorsExpanded)}
-                      className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors w-full text-left"
-                    >
-                      <span className={`transition-transform ${errorsExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                      <span>{result.error_messages.length} error{result.error_messages.length !== 1 ? 's' : ''} — click to {errorsExpanded ? 'collapse' : 'expand'}</span>
-                    </button>
-                    {errorsExpanded && (
-                      <div className="mt-2 bg-muted/50 rounded-md p-3 max-h-48 overflow-y-auto font-mono text-xs space-y-1">
-                        {result.error_messages.map((msg, i) => (
-                          <div key={i} className="flex gap-2">
-                            <span className="text-red-400 shrink-0">&#10007;</span>
-                            <span className="text-red-400">{msg}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <Button variant="secondary" onClick={reset}>Index Another</Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {state === 'error' && (
-            <Card className="bg-card border-destructive/30">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-base">Error</CardTitle>
-                  <Badge variant="destructive" className="text-xs">Failed</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-red-400">{errorMsg}</p>
-                <Button variant="secondary" onClick={reset}>Try Again</Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Pipeline Log */}
-          {logs.length > 0 && (
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Pipeline Log</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto font-mono text-xs space-y-1">
-                  {logs.map((entry, i) => (
-                    <div key={i} className="flex gap-2">
-                      <span className={
-                        entry.level === 'error' ? 'text-red-400 shrink-0' :
-                        entry.level === 'warn' ? 'text-yellow-400 shrink-0' :
-                        'text-muted-foreground shrink-0'
-                      }>
-                        {entry.level === 'error' ? '✗' : entry.level === 'warn' ? '⚠' : '▸'}
-                      </span>
-                      <span className={
-                        entry.level === 'error' ? 'text-red-400' :
-                        entry.level === 'warn' ? 'text-yellow-400' :
-                        'text-foreground'
-                      }>
-                        {entry.message}
-                      </span>
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Modules</span>
+                      <p className="font-medium">{result.modules}</p>
                     </div>
-                  ))}
-                  <div ref={logEndRef} />
+                    <div>
+                      <span className="text-muted-foreground">Files</span>
+                      <p className="font-medium">{result.files}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Atoms</span>
+                      <p className="font-medium">{result.atoms}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Errors</span>
+                      <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'font-medium'}>{result.errors}</p>
+                    </div>
+                  </div>
+                  {result.errors > 0 && result.error_messages && result.error_messages.length > 0 && (
+                    <div className="border-t border-border pt-2">
+                      <button
+                        onClick={() => setErrorsExpanded(!errorsExpanded)}
+                        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors w-full text-left"
+                      >
+                        <span className={`transition-transform ${errorsExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                        <span>{result.error_messages.length} error{result.error_messages.length !== 1 ? 's' : ''}</span>
+                      </button>
+                      {errorsExpanded && (
+                        <div className="mt-1 bg-muted/50 rounded-md p-2 max-h-40 overflow-y-auto font-mono text-xs space-y-1">
+                          {result.error_messages.map((msg, i) => (
+                            <div key={i} className="flex gap-2">
+                              <span className="text-red-400 shrink-0">&#10007;</span>
+                              <span className="text-red-400">{msg}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <Button variant="secondary" size="sm" onClick={reset}>Index Another</Button>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
+
+              {state === 'error' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive" className="text-xs">Failed</Badge>
+                  </div>
+                  <p className="text-xs text-red-400">{errorMsg}</p>
+                  <Button variant="secondary" size="sm" onClick={reset}>Try Again</Button>
+                </div>
+              )}
+            </div>
+
+            {/* Right: log */}
+            {logs.length > 0 && (
+              <div className="flex-1 min-w-0 bg-muted/50 rounded-md p-2 max-h-80 overflow-y-auto font-mono text-xs space-y-1">
+                {logs.map((entry, i) => (
+                  <div key={i} className="flex gap-2">
+                    <span className={
+                      entry.level === 'error' ? 'text-red-400 shrink-0' :
+                      entry.level === 'warn' ? 'text-yellow-400 shrink-0' :
+                      'text-muted-foreground shrink-0'
+                    }>
+                      {entry.level === 'error' ? '\u2717' : entry.level === 'warn' ? '\u26A0' : '\u25B8'}
+                    </span>
+                    <span className={
+                      entry.level === 'error' ? 'text-red-400' :
+                      entry.level === 'warn' ? 'text-yellow-400' :
+                      'text-foreground'
+                    }>
+                      {entry.message}
+                    </span>
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
