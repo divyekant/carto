@@ -84,6 +84,22 @@ func isBinary(name string, content []byte) bool {
 	return false
 }
 
+// readHeader reads up to n bytes from the beginning of a file.
+// Returns nil on any error (the file will be processed normally).
+func readHeader(path string, n int) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	nr, err := f.Read(buf)
+	if err != nil || nr == 0 {
+		return nil
+	}
+	return buf[:nr]
+}
+
 // Scan walks the file tree at rootPath and returns all source files and
 // detected modules. It respects .gitignore patterns and skips common
 // non-code directories and lock files.
@@ -133,8 +149,9 @@ func Scan(rootPath string) (*ScanResult, error) {
 			return nil
 		}
 
-		// Skip binary files
-		if isBinary(name, nil) {
+		// Skip binary files — check extension first (fast path), then
+		// read first 512 bytes for null-byte detection if needed.
+		if isBinary(name, readHeader(path, 512)) {
 			return nil
 		}
 

@@ -423,6 +423,26 @@ func TestIsBinary_MagicBytes(t *testing.T) {
 	}
 }
 
+func TestScan_SkipsBinaryByContent(t *testing.T) {
+	root := t.TempDir()
+
+	// A text file with a non-binary extension.
+	createFile(t, root+"/main.go", "package main\n\nfunc main() {}")
+	// A file with no known binary extension but containing null bytes.
+	os.WriteFile(filepath.Join(root, "data.custom"), []byte("hello\x00world"), 0o644)
+
+	result, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan() error: %v", err)
+	}
+
+	for _, f := range result.Files {
+		if f.RelPath == "data.custom" {
+			t.Error("expected data.custom (contains null bytes) to be skipped by Scan")
+		}
+	}
+}
+
 // --- Full Scan Integration Test ---
 
 func TestScan_Integration(t *testing.T) {
