@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import IndexRun from './pages/IndexRun'
 import Query from './pages/Query'
 import Settings from './pages/Settings'
+import ProjectDetail from './pages/ProjectDetail'
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
             <Route path="/index" element={<IndexRun />} />
             <Route path="/query" element={<Query />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/projects/:name" element={<ProjectDetail />} />
           </Route>
         </Routes>
       </BrowserRouter>

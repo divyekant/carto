@@ -11,10 +11,10 @@ interface ProjectCardProps {
     result?: { modules: number; files: number; atoms: number; errors: number }
     error?: string
   }
-  onReindex?: () => void
+  onClick?: () => void
 }
 
-export function ProjectCard({ name, path, indexedAt, fileCount, runStatus, onReindex }: ProjectCardProps) {
+export function ProjectCard({ name, path, indexedAt, fileCount, runStatus, onClick }: ProjectCardProps) {
   const timeAgo = getTimeAgo(indexedAt)
 
   const statusBadge = runStatus ? (
@@ -28,7 +28,7 @@ export function ProjectCard({ name, path, indexedAt, fileCount, runStatus, onRei
   ) : null
 
   return (
-    <Card className="bg-card hover:border-primary/30 transition-colors">
+    <Card className="bg-card hover:border-primary/30 transition-colors cursor-pointer" onClick={onClick}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">{name}</CardTitle>
@@ -45,14 +45,6 @@ export function ProjectCard({ name, path, indexedAt, fileCount, runStatus, onRei
           <p className="text-xs text-red-400 mb-2 truncate" title={runStatus.error}>
             {runStatus.error}
           </p>
-        )}
-        {onReindex && (
-          <button
-            onClick={onReindex}
-            className="text-xs text-primary hover:text-primary/80 transition-colors"
-          >
-            Re-index &rarr;
-          </button>
         )}
       </CardContent>
     </Card>

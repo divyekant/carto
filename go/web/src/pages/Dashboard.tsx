@@ -91,7 +91,7 @@ export default function Dashboard() {
               indexedAt={p.indexed_at}
               fileCount={p.file_count}
               runStatus={runStatuses[p.name]}
-              onReindex={() => navigate(`/index?path=${encodeURIComponent(p.path)}`)}
+              onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
             />
           ))}
         </div>
