@@ -1,9 +1,11 @@
 package sources
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -80,6 +82,61 @@ func LoadSourcesConfig(rootPath string) (*SourcesYAML, error) {
 		return nil, fmt.Errorf("sources config: %w", err)
 	}
 	return ParseSourcesConfig(data)
+}
+
+// SaveSourcesConfig writes a SourcesYAML to .carto/sources.yaml in the given
+// project root directory. Keys are sorted for deterministic output.
+func SaveSourcesConfig(projectRoot string, cfg *SourcesYAML) error {
+	cartoDir := filepath.Join(projectRoot, ".carto")
+	if err := os.MkdirAll(cartoDir, 0o755); err != nil {
+		return fmt.Errorf("sources config: %w", err)
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("sources:\n")
+
+	// Sort source names for deterministic output.
+	srcNames := make([]string, 0, len(cfg.Sources))
+	for k := range cfg.Sources {
+		srcNames = append(srcNames, k)
+	}
+	sort.Strings(srcNames)
+
+	for _, srcName := range srcNames {
+		entry := cfg.Sources[srcName]
+		buf.WriteString("  " + srcName + ":\n")
+
+		// Collect all keys from Settings and ListSettings, sort them.
+		keySet := make(map[string]struct{})
+		for k := range entry.Settings {
+			keySet[k] = struct{}{}
+		}
+		for k := range entry.ListSettings {
+			keySet[k] = struct{}{}
+		}
+		keys := make([]string, 0, len(keySet))
+		for k := range keySet {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			if items, ok := entry.ListSettings[k]; ok {
+				buf.WriteString("    " + k + ":\n")
+				for _, item := range items {
+					buf.WriteString("      - " + item + "\n")
+				}
+			} else if v, ok := entry.Settings[k]; ok {
+				buf.WriteString("    " + k + ": " + v + "\n")
+			}
+		}
+	}
+
+	yamlPath := filepath.Join(cartoDir, "sources.yaml")
+	if err := os.WriteFile(yamlPath, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("sources config: %w", err)
+	}
+	return nil
 }
 
 // Credentials holds all integration tokens/keys from config or environment.

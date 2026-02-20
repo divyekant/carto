@@ -150,6 +150,29 @@ sources:
 	}
 }
 
+func TestSaveSourcesConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &SourcesYAML{
+		Sources: map[string]SourceEntry{
+			"github": {Settings: map[string]string{"owner": "test", "repo": "app"}},
+			"jira":   {Settings: map[string]string{"project": "PROJ"}},
+		},
+	}
+	if err := SaveSourcesConfig(dir, cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := LoadSourcesConfig(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Sources["github"].Settings["owner"] != "test" {
+		t.Fatalf("expected owner=test, got %s", loaded.Sources["github"].Settings["owner"])
+	}
+	if loaded.Sources["jira"].Settings["project"] != "PROJ" {
+		t.Fatalf("expected project=PROJ")
+	}
+}
+
 func TestMapYAMLKeys_Jira(t *testing.T) {
 	settings := map[string]string{
 		"url":     "https://test.atlassian.net",
