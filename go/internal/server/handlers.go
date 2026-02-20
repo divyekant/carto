@@ -185,6 +185,12 @@ type configResponse struct {
 	LLMApiKey     string `json:"llm_api_key"`
 	LLMBaseURL    string `json:"llm_base_url"`
 	GitHubToken   string `json:"github_token"`
+	JiraToken     string `json:"jira_token"`
+	JiraEmail     string `json:"jira_email"`
+	JiraBaseURL   string `json:"jira_base_url"`
+	LinearToken   string `json:"linear_token"`
+	NotionToken   string `json:"notion_token"`
+	SlackToken    string `json:"slack_token"`
 }
 
 // handleGetConfig returns the current server config with API keys redacted.
@@ -204,6 +210,12 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		LLMApiKey:     redactKey(cfg.LLMApiKey),
 		LLMBaseURL:    cfg.LLMBaseURL,
 		GitHubToken:   redactKey(cfg.GitHubToken),
+		JiraToken:     redactKey(cfg.JiraToken),
+		JiraEmail:     cfg.JiraEmail,
+		JiraBaseURL:   cfg.JiraBaseURL,
+		LinearToken:   redactKey(cfg.LinearToken),
+		NotionToken:   redactKey(cfg.NotionToken),
+		SlackToken:    redactKey(cfg.SlackToken),
 	})
 }
 
@@ -257,6 +269,30 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		case "github_token":
 			if v, ok := val.(string); ok {
 				s.cfg.GitHubToken = v
+			}
+		case "jira_token":
+			if v, ok := val.(string); ok {
+				s.cfg.JiraToken = v
+			}
+		case "jira_email":
+			if v, ok := val.(string); ok {
+				s.cfg.JiraEmail = v
+			}
+		case "jira_base_url":
+			if v, ok := val.(string); ok {
+				s.cfg.JiraBaseURL = v
+			}
+		case "linear_token":
+			if v, ok := val.(string); ok {
+				s.cfg.LinearToken = v
+			}
+		case "notion_token":
+			if v, ok := val.(string); ok {
+				s.cfg.NotionToken = v
+			}
+		case "slack_token":
+			if v, ok := val.(string); ok {
+				s.cfg.SlackToken = v
 			}
 		}
 	}

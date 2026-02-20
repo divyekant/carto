@@ -25,6 +25,12 @@ interface Config {
   memories_key: string
   max_concurrent: number
   github_token: string
+  jira_token: string
+  jira_email: string
+  jira_base_url: string
+  linear_token: string
+  notion_token: string
+  slack_token: string
 }
 
 interface ModelOption {
@@ -248,6 +254,12 @@ export default function Settings() {
     memories_key: '',
     max_concurrent: 10,
     github_token: '',
+    jira_token: '',
+    jira_email: '',
+    jira_base_url: '',
+    linear_token: '',
+    notion_token: '',
+    slack_token: '',
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -329,6 +341,24 @@ export default function Settings() {
       }
       if (config.github_token && !config.github_token.includes('****')) {
         patch.github_token = config.github_token
+      }
+      if (config.jira_token && !config.jira_token.includes('****')) {
+        patch.jira_token = config.jira_token
+      }
+      if (config.jira_email) {
+        patch.jira_email = config.jira_email
+      }
+      if (config.jira_base_url) {
+        patch.jira_base_url = config.jira_base_url
+      }
+      if (config.linear_token && !config.linear_token.includes('****')) {
+        patch.linear_token = config.linear_token
+      }
+      if (config.notion_token && !config.notion_token.includes('****')) {
+        patch.notion_token = config.notion_token
+      }
+      if (config.slack_token && !config.slack_token.includes('****')) {
+        patch.slack_token = config.slack_token
       }
 
       const res = await fetch('/api/config', {
@@ -508,12 +538,12 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-base">Memories Server</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-base">Memories Server</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="memories_url">URL</Label>
                 <Input
@@ -536,24 +566,25 @@ export default function Settings() {
                   onChange={(e) => updateField('memories_key', e.target.value)}
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <Button variant="secondary" onClick={testConnection} disabled={connectionStatus === 'testing'}>
-                  {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
-                </Button>
-                {connectionStatus === 'connected' && (
-                  <Badge variant="default" className="text-xs">Connected</Badge>
-                )}
-                {connectionStatus === 'unreachable' && (
-                  <div className="flex flex-col gap-1">
-                    <Badge variant="destructive" className="text-xs">Unreachable</Badge>
-                    {connectionError && <p className="text-xs text-red-400">{connectionError}</p>}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button variant="secondary" onClick={testConnection} disabled={connectionStatus === 'testing'}>
+                {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+              </Button>
+              {connectionStatus === 'connected' && (
+                <Badge variant="default" className="text-xs">Connected</Badge>
+              )}
+              {connectionStatus === 'unreachable' && (
+                <div className="flex flex-col gap-1">
+                  <Badge variant="destructive" className="text-xs">Unreachable</Badge>
+                  {connectionError && <p className="text-xs text-red-400">{connectionError}</p>}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
-          <Card className="bg-card border-border">
+        <Card className="bg-card border-border">
             <CardHeader>
               <CardTitle className="text-base">Integrations</CardTitle>
             </CardHeader>
@@ -568,12 +599,95 @@ export default function Settings() {
                   onChange={(e) => updateField('github_token', e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enables private repo cloning and fetching GitHub issues/PRs as context during indexing.
+                  Private repos, issues, and PRs
+                </p>
+              </div>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2">
+                <Label htmlFor="jira_base_url">Jira Base URL</Label>
+                <Input
+                  id="jira_base_url"
+                  placeholder="https://your-org.atlassian.net (optional)"
+                  value={config.jira_base_url || ''}
+                  onChange={(e) => updateField('jira_base_url', e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="jira_email">Jira Email</Label>
+                  <Input
+                    id="jira_email"
+                    placeholder="user@company.com (optional)"
+                    value={config.jira_email || ''}
+                    onChange={(e) => updateField('jira_email', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="jira_token">Jira API Token</Label>
+                  <Input
+                    id="jira_token"
+                    type="password"
+                    placeholder="(optional)"
+                    value={config.jira_token || ''}
+                    onChange={(e) => updateField('jira_token', e.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Jira Cloud tickets as signal context
+              </p>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2">
+                <Label htmlFor="linear_token">Linear API Key</Label>
+                <Input
+                  id="linear_token"
+                  type="password"
+                  placeholder="lin_api_... (optional)"
+                  value={config.linear_token || ''}
+                  onChange={(e) => updateField('linear_token', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Linear issues as signal context
+                </p>
+              </div>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2">
+                <Label htmlFor="notion_token">Notion Integration Token</Label>
+                <Input
+                  id="notion_token"
+                  type="password"
+                  placeholder="ntn_... (optional)"
+                  value={config.notion_token || ''}
+                  onChange={(e) => updateField('notion_token', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Notion database pages as knowledge context
+                </p>
+              </div>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2">
+                <Label htmlFor="slack_token">Slack Bot Token</Label>
+                <Input
+                  id="slack_token"
+                  type="password"
+                  placeholder="xoxb-... (optional)"
+                  value={config.slack_token || ''}
+                  onChange={(e) => updateField('slack_token', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Slack channel threads as discussion context
                 </p>
               </div>
             </CardContent>
-          </Card>
-        </div>
+        </Card>
 
         <Button onClick={save} disabled={saving}>
           {saving ? 'Saving...' : 'Save Settings'}
