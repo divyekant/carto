@@ -69,19 +69,32 @@ func main() {
 
 func indexCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "index <path>",
+		Use:   "index [path]",
 		Short: "Index a codebase",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runIndex,
 	}
 	cmd.Flags().Bool("full", false, "Force full re-index")
 	cmd.Flags().String("module", "", "Index a single module")
 	cmd.Flags().Bool("incremental", false, "Only re-index changed files")
 	cmd.Flags().String("project", "", "Project name (defaults to directory name)")
+	cmd.Flags().Bool("all", false, "Re-index all projects")
+	cmd.Flags().Bool("changed", false, "Re-index only modified projects")
 	return cmd
 }
 
 func runIndex(cmd *cobra.Command, args []string) error {
+	allFlag, _ := cmd.Flags().GetBool("all")
+	changedFlag, _ := cmd.Flags().GetBool("changed")
+
+	if allFlag || changedFlag {
+		return runIndexAll(cmd, changedFlag)
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("path argument is required (or use --all / --changed)")
+	}
+
 	absPath, err := filepath.Abs(args[0])
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -197,6 +210,76 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runIndexAll lists projects that would be indexed when --all or --changed is used.
+// It does NOT run the pipeline (that requires LLM keys); it only enumerates projects.
+func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		return fmt.Errorf("PROJECTS_DIR environment variable is not set")
+	}
+
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return fmt.Errorf("read projects dir: %w", err)
+	}
+
+	quiet, _ := cmd.Flags().GetBool("quiet")
+
+	type projectEntry struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		IndexedAt string `json:"indexed_at"`
+	}
+
+	var projects []projectEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectPath := filepath.Join(projectsDir, entry.Name())
+		mf, err := manifest.Load(projectPath)
+		if err != nil || mf.IsEmpty() {
+			continue
+		}
+
+		// TODO: For --changed, detect actual modifications (e.g. compare
+		// file hashes against the manifest). For now we list all projects
+		// regardless of the changedOnly flag.
+
+		name := mf.Project
+		if name == "" {
+			name = entry.Name()
+		}
+
+		projects = append(projects, projectEntry{
+			Name:      name,
+			Path:      projectPath,
+			IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+		})
+
+		if !quiet {
+			fmt.Printf("  %s%s%s\n", bold, name, reset)
+		}
+	}
+
+	mode := "all"
+	if changedOnly {
+		mode = "changed"
+	}
+
+	writeOutput(cmd, map[string]interface{}{
+		"mode":     mode,
+		"projects": projects,
+	}, func() {
+		if len(projects) == 0 {
+			fmt.Println("No indexed projects found.")
+			return
+		}
+		fmt.Printf("\n%s%sWould re-index %d project(s) (mode: %s)%s\n", bold, cyan, len(projects), mode, reset)
+	})
+	return nil
+}
+
 // --------------------------------------------------------------------------
 // query
 // --------------------------------------------------------------------------
@@ -234,20 +317,22 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("retrieve by tier: %w", err)
 		}
 
-		fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, cyan, project, tier, reset)
+		writeOutput(cmd, results, func() {
+			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, cyan, project, tier, reset)
 
-		for layer, entries := range results {
-			if len(entries) == 0 {
-				continue
+			for layer, entries := range results {
+				if len(entries) == 0 {
+					continue
+				}
+				fmt.Printf("%s%s[%s]%s\n", bold, yellow, layer, reset)
+				for _, entry := range entries {
+					snippet := truncateText(entry.Text, 200)
+					fmt.Printf("  %ssource:%s %s\n", cyan, reset, entry.Source)
+					fmt.Printf("  %sscore:%s  %.4f\n", cyan, reset, entry.Score)
+					fmt.Printf("  %s\n\n", snippet)
+				}
 			}
-			fmt.Printf("%s%s[%s]%s\n", bold, yellow, layer, reset)
-			for _, entry := range entries {
-				snippet := truncateText(entry.Text, 200)
-				fmt.Printf("  %ssource:%s %s\n", cyan, reset, entry.Source)
-				fmt.Printf("  %sscore:%s  %.4f\n", cyan, reset, entry.Score)
-				fmt.Printf("  %s\n\n", snippet)
-			}
-		}
+		})
 		return nil
 	}
 
@@ -260,18 +345,20 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("search: %w", err)
 	}
 
-	fmt.Printf("%s%sSearch results for: %q%s (k=%d)\n\n", bold, cyan, query, reset, count)
+	writeOutput(cmd, results, func() {
+		fmt.Printf("%s%sSearch results for: %q%s (k=%d)\n\n", bold, cyan, query, reset, count)
 
-	if len(results) == 0 {
-		fmt.Println("  No results found.")
-		return nil
-	}
+		if len(results) == 0 {
+			fmt.Println("  No results found.")
+			return
+		}
 
-	for i, r := range results {
-		snippet := truncateText(r.Text, 200)
-		fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, cyan, reset, r.Source, cyan, reset, r.Score)
-		fmt.Printf("   %s\n\n", snippet)
-	}
+		for i, r := range results {
+			snippet := truncateText(r.Text, 200)
+			fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, cyan, reset, r.Source, cyan, reset, r.Score)
+			fmt.Printf("   %s\n\n", snippet)
+		}
+	})
 
 	return nil
 }
@@ -300,29 +387,48 @@ func runModules(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	fmt.Printf("%s%sDetected modules in %s%s\n\n", bold, cyan, absPath, reset)
-
-	if len(result.Modules) == 0 {
-		fmt.Println("  No modules detected.")
-		return nil
+	type moduleInfo struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Path  string `json:"path"`
+		Files int    `json:"files"`
 	}
 
-	fmt.Printf("  %-30s %-15s %-40s %s\n", "NAME", "TYPE", "PATH", "FILES")
-	fmt.Printf("  %-30s %-15s %-40s %s\n",
-		strings.Repeat("-", 30),
-		strings.Repeat("-", 15),
-		strings.Repeat("-", 40),
-		strings.Repeat("-", 6))
-
+	modules := make([]moduleInfo, 0, len(result.Modules))
 	for _, mod := range result.Modules {
 		relPath := mod.RelPath
 		if relPath == "" {
 			relPath = "."
 		}
-		fmt.Printf("  %-30s %-15s %-40s %d\n", mod.Name, mod.Type, relPath, len(mod.Files))
+		modules = append(modules, moduleInfo{
+			Name:  mod.Name,
+			Type:  mod.Type,
+			Path:  relPath,
+			Files: len(mod.Files),
+		})
 	}
 
-	fmt.Printf("\n  %sTotal:%s %d module(s), %d file(s)\n", bold, reset, len(result.Modules), len(result.Files))
+	writeOutput(cmd, modules, func() {
+		fmt.Printf("%s%sDetected modules in %s%s\n\n", bold, cyan, absPath, reset)
+
+		if len(modules) == 0 {
+			fmt.Println("  No modules detected.")
+			return
+		}
+
+		fmt.Printf("  %-30s %-15s %-40s %s\n", "NAME", "TYPE", "PATH", "FILES")
+		fmt.Printf("  %-30s %-15s %-40s %s\n",
+			strings.Repeat("-", 30),
+			strings.Repeat("-", 15),
+			strings.Repeat("-", 40),
+			strings.Repeat("-", 6))
+
+		for _, mod := range modules {
+			fmt.Printf("  %-30s %-15s %-40s %d\n", mod.Name, mod.Type, mod.Path, mod.Files)
+		}
+
+		fmt.Printf("\n  %sTotal:%s %d module(s), %d file(s)\n", bold, reset, len(result.Modules), len(result.Files))
+	})
 
 	return nil
 }
@@ -452,10 +558,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load manifest: %w", err)
 	}
 
-	fmt.Printf("%s%sIndex status for %s%s\n\n", bold, cyan, absPath, reset)
-
 	if mf.IsEmpty() {
-		fmt.Printf("  %sNo index found.%s Run %scarto index %s%s to create one.\n", yellow, reset, bold, absPath, reset)
+		writeOutput(cmd, map[string]interface{}{"indexed": false, "path": absPath}, func() {
+			fmt.Printf("%s%sIndex status for %s%s\n\n", bold, cyan, absPath, reset)
+			fmt.Printf("  %sNo index found.%s Run %scarto index %s%s to create one.\n", yellow, reset, bold, absPath, reset)
+		})
 		return nil
 	}
 
@@ -470,10 +577,27 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		totalSize += entry.Size
 	}
 
-	fmt.Printf("  %sProject:%s     %s\n", cyan, reset, projectName)
-	fmt.Printf("  %sLast indexed:%s %s\n", cyan, reset, mf.IndexedAt.Format(time.RFC3339))
-	fmt.Printf("  %sFiles:%s       %d\n", cyan, reset, len(mf.Files))
-	fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, formatBytes(totalSize))
+	type statusData struct {
+		Project   string `json:"project"`
+		Files     int    `json:"files"`
+		TotalSize string `json:"total_size"`
+		IndexedAt string `json:"indexed_at"`
+	}
+
+	data := statusData{
+		Project:   projectName,
+		Files:     len(mf.Files),
+		TotalSize: formatBytes(totalSize),
+		IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+	}
+
+	writeOutput(cmd, data, func() {
+		fmt.Printf("%s%sIndex status for %s%s\n\n", bold, cyan, absPath, reset)
+		fmt.Printf("  %sProject:%s     %s\n", cyan, reset, data.Project)
+		fmt.Printf("  %sLast indexed:%s %s\n", cyan, reset, data.IndexedAt)
+		fmt.Printf("  %sFiles:%s       %d\n", cyan, reset, data.Files)
+		fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, data.TotalSize)
+	})
 
 	return nil
 }
