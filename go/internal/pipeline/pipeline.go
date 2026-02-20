@@ -12,15 +12,16 @@ import (
 	"path/filepath"
 	"sync"
 
+	"context"
+
 	"github.com/divyekant/carto/internal/analyzer"
 	"github.com/divyekant/carto/internal/atoms"
 	"github.com/divyekant/carto/internal/chunker"
 	"github.com/divyekant/carto/internal/history"
-	"github.com/divyekant/carto/internal/knowledge"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/scanner"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
 
@@ -36,9 +37,8 @@ type Config struct {
 	RootPath       string
 	LLMClient      LLMClient
 	MemoriesClient storage.MemoriesAPI
-	SignalRegistry    *signals.Registry
-	KnowledgeRegistry *knowledge.Registry // optional: project-level knowledge sources
-	MaxWorkers        int
+	SourceRegistry *sources.Registry // unified source registry (replaces SignalRegistry + KnowledgeRegistry)
+	MaxWorkers     int
 	ProgressFn     func(phase string, done, total int) // optional progress callback
 	LogFn          func(level, msg string)              // optional log callback
 	Incremental    bool                                 // use manifest for incremental indexing
@@ -239,8 +239,8 @@ func Run(cfg Config) (*Result, error) {
 	logFn("info", fmt.Sprintf("Extracted %d atoms. Fetching git history and signals...", result.AtomsCreated))
 
 	type moduleContext struct {
-		history []*history.FileHistory
-		signals []signals.Signal
+		history   []*history.FileHistory
+		artifacts []sources.Artifact // module-scoped source artifacts (e.g., git commits)
 	}
 
 	moduleContexts := make([]moduleContext, len(work))
@@ -264,26 +264,26 @@ func Run(cfg Config) (*Result, error) {
 				cfg.MaxWorkers,
 			)
 
-			// Fetch signals.
-			var sigs []signals.Signal
-			if cfg.SignalRegistry != nil {
-				sigMod := signals.Module{
-					Name:    mw.module.Name,
-					Path:    mw.module.Path,
-					RelPath: mw.module.RelPath,
-					Files:   mw.filesToIndex,
+			// Fetch module-scoped source artifacts (e.g., git commits).
+			var arts []sources.Artifact
+			if cfg.SourceRegistry != nil {
+				req := sources.FetchRequest{
+					Project:    cfg.ProjectName,
+					Module:     mw.module.Name,
+					ModulePath: mw.module.Path,
+					RepoRoot:   scanResult.Root,
 				}
-				var sigErr error
-				sigs, sigErr = cfg.SignalRegistry.FetchAll(sigMod)
-				if sigErr != nil {
+				var srcErr error
+				arts, srcErr = cfg.SourceRegistry.FetchModule(context.Background(), req)
+				if srcErr != nil {
 					contextMu.Lock()
-					contextErrors = append(contextErrors, sigErr)
+					contextErrors = append(contextErrors, srcErr)
 					contextMu.Unlock()
 				}
 			}
 
 			contextMu.Lock()
-			moduleContexts[idx] = moduleContext{history: histories, signals: sigs}
+			moduleContexts[idx] = moduleContext{history: histories, artifacts: arts}
 			if histErr != nil {
 				contextErrors = append(contextErrors, histErr)
 			}
@@ -297,23 +297,21 @@ func Run(cfg Config) (*Result, error) {
 	wg.Wait()
 	result.Errors = append(result.Errors, contextErrors...)
 
-	// ── Phase 3b: Knowledge Documents ────────────────────────────────
-	if cfg.KnowledgeRegistry != nil {
-		logFn("info", "Fetching knowledge documents...")
-		knowledgeDocs, kErr := cfg.KnowledgeRegistry.FetchAll(cfg.ProjectName)
-		if kErr != nil {
-			result.Errors = append(result.Errors, kErr)
+	// ── Phase 3b: Project-Scope Sources ──────────────────────────────
+	var projectArtifacts []sources.Artifact
+	if cfg.SourceRegistry != nil {
+		logFn("info", "Fetching project-scope sources...")
+		req := sources.FetchRequest{
+			Project:  cfg.ProjectName,
+			RepoRoot: scanResult.Root,
 		}
-		if len(knowledgeDocs) > 0 {
-			logFn("info", fmt.Sprintf("Found %d knowledge document(s)", len(knowledgeDocs)))
-			store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
-			for _, doc := range knowledgeDocs {
-				content := fmt.Sprintf("# %s\n\nSource: %s\nType: %s\n\n%s", doc.Title, doc.URL, doc.Type, doc.Content)
-				if err := store.StoreLayer("_knowledge", doc.Type+"/"+doc.Title, content); err != nil {
-					log.Printf("pipeline: warning: failed to store knowledge doc %s: %v", doc.Title, err)
-					result.Errors = append(result.Errors, err)
-				}
-			}
+		pArts, pErr := cfg.SourceRegistry.FetchAllProject(context.Background(), req)
+		if pErr != nil {
+			result.Errors = append(result.Errors, pErr)
+		}
+		projectArtifacts = pArts
+		if len(projectArtifacts) > 0 {
+			logFn("info", fmt.Sprintf("Fetched %d project-scope artifact(s)", len(projectArtifacts)))
 		}
 	}
 
@@ -329,7 +327,7 @@ func Run(cfg Config) (*Result, error) {
 			Path:    w.module.Path,
 			Atoms:   moduleAtomsList[i].atoms,
 			History: moduleContexts[i].history,
-			Signals: moduleContexts[i].signals,
+			Signals: moduleContexts[i].artifacts,
 		}
 	}
 
@@ -383,8 +381,8 @@ func Run(cfg Config) (*Result, error) {
 		storeDone++
 		progress("store", storeDone, storeTotal)
 
-		// Store signals.
-		if sigsJSON, err := json.Marshal(moduleContexts[i].signals); err == nil {
+		// Store module-scoped artifacts (signals).
+		if sigsJSON, err := json.Marshal(moduleContexts[i].artifacts); err == nil {
 			if err := store.StoreLayer(modName, "signals", string(sigsJSON)); err != nil {
 				log.Printf("pipeline: warning: failed to store signals for %s: %v", modName, err)
 				result.Errors = append(result.Errors, err)
@@ -456,6 +454,23 @@ func Run(cfg Config) (*Result, error) {
 	} else {
 		storeDone += 2
 		progress("store", storeDone, storeTotal)
+	}
+
+	// Store project-scope artifacts by category.
+	for _, art := range projectArtifacts {
+		layer := "_signals" // default for Signal category
+		switch art.Category {
+		case sources.Knowledge:
+			layer = "_knowledge"
+		case sources.Context:
+			layer = "_context"
+		}
+		content := fmt.Sprintf("# %s\n\nSource: %s\nURL: %s\n\n%s", art.Title, art.Source, art.URL, art.Body)
+		key := art.Source + "/" + art.ID
+		if err := store.StoreLayer(layer, key, content); err != nil {
+			log.Printf("pipeline: warning: failed to store %s artifact %s: %v", layer, art.ID, err)
+			result.Errors = append(result.Errors, err)
+		}
 	}
 
 	// Save manifest.

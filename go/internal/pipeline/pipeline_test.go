@@ -9,8 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"context"
+
 	"github.com/divyekant/carto/internal/llm"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
 
@@ -113,16 +115,19 @@ func (m *mockMemories) getMemories() []storedMemory {
 	return cp
 }
 
-// ── Mock Signal Source ─────────────────────────────────────────────────
+// ── Mock Source (implements sources.Source) ────────────────────────────
 
-type mockSignalSource struct{}
+type mockPipelineSource struct {
+	name      string
+	scope     sources.Scope
+	artifacts []sources.Artifact
+}
 
-func (s *mockSignalSource) Name() string                               { return "mock" }
-func (s *mockSignalSource) Configure(cfg map[string]string) error      { return nil }
-func (s *mockSignalSource) FetchSignals(mod signals.Module) ([]signals.Signal, error) {
-	return []signals.Signal{
-		{Type: "ticket", ID: "TEST-1", Title: "Test ticket", Author: "tester"},
-	}, nil
+func (s *mockPipelineSource) Name() string                { return s.name }
+func (s *mockPipelineSource) Scope() sources.Scope        { return s.scope }
+func (s *mockPipelineSource) Configure(cfg sources.SourceConfig) error { return nil }
+func (s *mockPipelineSource) Fetch(_ context.Context, _ sources.FetchRequest) ([]sources.Artifact, error) {
+	return s.artifacts, nil
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -179,8 +184,14 @@ func TestRun_FullPipeline(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
 	mem := &mockMemories{healthy: true}
-	registry := signals.NewRegistry()
-	registry.Register(&mockSignalSource{})
+	registry := sources.NewRegistry()
+	registry.Register(&mockPipelineSource{
+		name:  "mock-project",
+		scope: sources.ProjectScope,
+		artifacts: []sources.Artifact{
+			{Source: "mock-project", Category: sources.Signal, ID: "TEST-1", Title: "Test ticket", Author: "tester", Tags: map[string]string{"type": "ticket"}},
+		},
+	})
 
 	// Track progress phases.
 	var progressMu sync.Mutex
@@ -191,7 +202,7 @@ func TestRun_FullPipeline(t *testing.T) {
 		RootPath:       dir,
 		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		SignalRegistry: registry,
+		SourceRegistry: registry,
 		MaxWorkers:     2,
 		ProgressFn: func(phase string, done, total int) {
 			progressMu.Lock()

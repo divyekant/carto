@@ -11,11 +11,10 @@ import (
 
 	"github.com/divyekant/carto/internal/config"
 	"github.com/divyekant/carto/internal/gitclone"
-	"github.com/divyekant/carto/internal/knowledge"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/pipeline"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
 
@@ -381,28 +380,28 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		BaseURL:       cfg.LLMBaseURL,
 	})
 
-	registry := signals.NewRegistry()
-	registry.Register(signals.NewGitSignalSource(absPath))
+	// Build unified source registry.
+	srcRegistry := sources.NewRegistry()
+	srcRegistry.Register(sources.NewGitSource(absPath))
 
-	// If we know the GitHub owner/repo, also register the GitHub signal source.
+	// If we know the GitHub owner/repo, also register the GitHub source.
 	if owner, repo := gitclone.ParseOwnerRepo(req.URL); owner != "" {
-		ghSrc := signals.NewGitHubSignalSource()
-		ghSrc.Configure(map[string]string{
-			"owner": owner,
-			"repo":  repo,
-			"token": cfg.GitHubToken,
+		ghSrc := sources.NewGitHubSource()
+		ghSrc.Configure(sources.SourceConfig{
+			Settings:    map[string]string{"owner": owner, "repo": repo},
+			Credentials: map[string]string{"github_token": cfg.GitHubToken},
 		})
-		registry.Register(ghSrc)
+		srcRegistry.Register(ghSrc)
 	}
 
-	// Set up knowledge sources if a docs/ directory exists in the project.
-	var knowledgeReg *knowledge.Registry
+	// Set up PDF knowledge source if a docs/ directory exists in the project.
 	docsDir := filepath.Join(absPath, "docs")
 	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
-		knowledgeReg = knowledge.NewRegistry()
-		pdfSrc := knowledge.NewLocalPDFSource()
-		pdfSrc.Configure(map[string]string{"dir": docsDir})
-		knowledgeReg.Register(pdfSrc)
+		pdfSrc := sources.NewPDFSource()
+		pdfSrc.Configure(sources.SourceConfig{
+			Settings: map[string]string{"dir": docsDir},
+		})
+		srcRegistry.Register(pdfSrc)
 	}
 
 	// Create a fresh Memories client from the current config so Settings
@@ -414,8 +413,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		RootPath:          absPath,
 		LLMClient:         llmClient,
 		MemoriesClient:    memoriesClient,
-		SignalRegistry:    registry,
-		KnowledgeRegistry: knowledgeReg,
+		SourceRegistry:    srcRegistry,
 		MaxWorkers:        cfg.MaxConcurrent,
 		ProgressFn: func(phase string, done, total int) {
 			run.SendProgress(phase, done, total)

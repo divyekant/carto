@@ -18,7 +18,7 @@ import (
 	"github.com/divyekant/carto/internal/pipeline"
 	"github.com/divyekant/carto/internal/scanner"
 	"github.com/divyekant/carto/internal/server"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 	cartoWeb "github.com/divyekant/carto/web"
 )
@@ -121,9 +121,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// Create Memories client.
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
-	// Create signal registry and register git signals.
-	registry := signals.NewRegistry()
-	registry.Register(signals.NewGitSignalSource(absPath))
+	// Create unified source registry and register git source.
+	registry := sources.NewRegistry()
+	registry.Register(sources.NewGitSource(absPath))
 
 	// Progress display state.
 	spinIdx := 0
@@ -156,7 +156,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		RootPath:       absPath,
 		LLMClient:      llmClient,
 		MemoriesClient: memoriesClient,
-		SignalRegistry: registry,
+		SourceRegistry: registry,
 		MaxWorkers:     cfg.MaxConcurrent,
 		ProgressFn:     progressFn,
 		Incremental:    incremental,

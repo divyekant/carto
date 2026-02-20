@@ -10,7 +10,7 @@ import (
 	"github.com/divyekant/carto/internal/atoms"
 	"github.com/divyekant/carto/internal/history"
 	"github.com/divyekant/carto/internal/llm"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 )
 
 // LLMClient is the interface needed for deep-tier calls.
@@ -24,7 +24,7 @@ type ModuleInput struct {
 	Path    string
 	Atoms   []*atoms.Atom
 	History []*history.FileHistory
-	Signals []signals.Signal
+	Signals []sources.Artifact
 }
 
 // Dependency represents a cross-unit connection with intent.
@@ -109,7 +109,11 @@ func buildModulePrompt(input ModuleInput) string {
 		b.WriteString("(none)\n\n")
 	} else {
 		for _, s := range input.Signals {
-			fmt.Fprintf(&b, "- [%s] %s: %s\n", s.Type, s.ID, s.Title)
+			sType := s.Tags["type"]
+			if sType == "" {
+				sType = string(s.Category)
+			}
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", sType, s.ID, s.Title)
 		}
 		b.WriteString("\n")
 	}

@@ -9,8 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"context"
+
 	"github.com/divyekant/carto/internal/llm"
-	"github.com/divyekant/carto/internal/signals"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
 
@@ -146,15 +148,16 @@ func (f *integrationMemories) layersStored() map[string]bool {
 	return layers
 }
 
-// integrationSignalSource returns a canned signal for testing.
-type integrationSignalSource struct{}
+// integrationSource returns canned artifacts for testing.
+type integrationSource struct{}
 
-func (s *integrationSignalSource) Name() string                          { return "integration-mock" }
-func (s *integrationSignalSource) Configure(cfg map[string]string) error { return nil }
-func (s *integrationSignalSource) FetchSignals(mod signals.Module) ([]signals.Signal, error) {
-	return []signals.Signal{
-		{Type: "ticket", ID: "INT-1", Title: "Integration test ticket", Author: "test-bot"},
-		{Type: "pr", ID: "#42", Title: "Add utility package", Author: "dev"},
+func (s *integrationSource) Name() string                                                        { return "integration-mock" }
+func (s *integrationSource) Scope() sources.Scope                                                { return sources.ProjectScope }
+func (s *integrationSource) Configure(cfg sources.SourceConfig) error                            { return nil }
+func (s *integrationSource) Fetch(_ context.Context, _ sources.FetchRequest) ([]sources.Artifact, error) {
+	return []sources.Artifact{
+		{Source: "integration-mock", Category: sources.Signal, ID: "INT-1", Title: "Integration test ticket", Author: "test-bot", Tags: map[string]string{"type": "ticket"}},
+		{Source: "integration-mock", Category: sources.Signal, ID: "#42", Title: "Add utility package", Author: "dev", Tags: map[string]string{"type": "pr"}},
 	}, nil
 }
 
@@ -266,8 +269,8 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	llmClient := &integrationLLM{}
 	mem := &integrationMemories{healthy: true}
-	registry := signals.NewRegistry()
-	registry.Register(&integrationSignalSource{})
+	registry := sources.NewRegistry()
+	registry.Register(&integrationSource{})
 
 	// Track progress phases and their order.
 	var progressMu sync.Mutex
@@ -279,7 +282,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		RootPath:       dir,
 		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		SignalRegistry: registry,
+		SourceRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true, // enable manifest creation
 		ProgressFn: func(phase string, done, total int) {
@@ -400,7 +403,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		RootPath:       dir,
 		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		SignalRegistry: registry,
+		SourceRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true,
 	})
@@ -493,9 +496,9 @@ func Farewell(name string) string {
 	}
 }
 
-// TestIntegration_NoSignalRegistry verifies the pipeline works without a
-// signal registry (nil).
-func TestIntegration_NoSignalRegistry(t *testing.T) {
+// TestIntegration_NoSourceRegistry verifies the pipeline works without a
+// source registry (nil).
+func TestIntegration_NoSourceRegistry(t *testing.T) {
 	dir := createIntegrationProject(t)
 
 	llmClient := &integrationLLM{}
@@ -506,7 +509,7 @@ func TestIntegration_NoSignalRegistry(t *testing.T) {
 		RootPath:       dir,
 		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		SignalRegistry: nil,
+		SourceRegistry: nil,
 		MaxWorkers:     2,
 	})
 	if err != nil {
