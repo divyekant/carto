@@ -173,6 +173,76 @@ func TestSaveSourcesConfig(t *testing.T) {
 	}
 }
 
+func TestSaveSourcesConfig_CreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "deep", "project")
+	// .carto dir doesn't exist yet — Save should create it.
+	cfg := &SourcesYAML{
+		Sources: map[string]SourceEntry{
+			"web": {Settings: map[string]string{"urls": "https://example.com"}},
+		},
+	}
+	if err := SaveSourcesConfig(nested, cfg); err != nil {
+		t.Fatalf("save to new dir: %v", err)
+	}
+	loaded, err := LoadSourcesConfig(nested)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Sources["web"].Settings["urls"] != "https://example.com" {
+		t.Fatalf("expected urls=https://example.com, got %s", loaded.Sources["web"].Settings["urls"])
+	}
+}
+
+func TestSaveSourcesConfig_ReadOnlyDir(t *testing.T) {
+	dir := t.TempDir()
+	// Make the dir read-only so MkdirAll for .carto will fail.
+	os.Chmod(dir, 0o444)
+	defer os.Chmod(dir, 0o755) // cleanup
+
+	cfg := &SourcesYAML{
+		Sources: map[string]SourceEntry{
+			"web": {Settings: map[string]string{"urls": "https://example.com"}},
+		},
+	}
+	err := SaveSourcesConfig(dir, cfg)
+	if err == nil {
+		t.Fatal("expected error saving to read-only directory")
+	}
+}
+
+func TestSaveSourcesConfig_Overwrite(t *testing.T) {
+	dir := t.TempDir()
+	// Save initial config.
+	cfg1 := &SourcesYAML{
+		Sources: map[string]SourceEntry{
+			"github": {Settings: map[string]string{"owner": "old"}},
+		},
+	}
+	if err := SaveSourcesConfig(dir, cfg1); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	// Overwrite with new config.
+	cfg2 := &SourcesYAML{
+		Sources: map[string]SourceEntry{
+			"jira": {Settings: map[string]string{"project": "NEW"}},
+		},
+	}
+	if err := SaveSourcesConfig(dir, cfg2); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	loaded, err := LoadSourcesConfig(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if _, ok := loaded.Sources["github"]; ok {
+		t.Fatal("github should have been overwritten")
+	}
+	if loaded.Sources["jira"].Settings["project"] != "NEW" {
+		t.Fatal("jira project should be NEW")
+	}
+}
+
 func TestMapYAMLKeys_Jira(t *testing.T) {
 	settings := map[string]string{
 		"url":     "https://test.atlassian.net",

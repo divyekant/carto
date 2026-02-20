@@ -92,6 +92,7 @@ export function Layout() {
               to={item.to}
               end={item.to === '/'}
               onClick={() => setMobileOpen(false)}
+              aria-label={item.label}
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-colors',
@@ -101,7 +102,7 @@ export function Layout() {
                 )
               }
             >
-              <span className="text-base shrink-0">{item.icon}</span>
+              <span className="text-base shrink-0" aria-hidden="true">{item.icon}</span>
               <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap text-xs">
                 {item.label}
               </span>

@@ -792,40 +792,52 @@ func TestDeleteProject_NotFound(t *testing.T) {
 }
 
 func TestIndexAll(t *testing.T) {
-	srv := New(config.Config{}, nil, "", nil)
+	dir := t.TempDir()
+	srv := New(config.Config{}, nil, dir, nil)
 
 	req := httptest.NewRequest("POST", "/api/projects/index-all?changed=true", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	// With an empty projects dir, we get 200 with no_projects (nothing to index).
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["status"] != "started" {
-		t.Errorf("expected status 'started', got %v", resp["status"])
-	}
-	if resp["changed_only"] != true {
-		t.Errorf("expected changed_only true, got %v", resp["changed_only"])
+	if resp["status"] != "no_projects" {
+		t.Errorf("expected status 'no_projects', got %v", resp["status"])
 	}
 }
 
 func TestIndexAll_NoChangedParam(t *testing.T) {
+	dir := t.TempDir()
+	srv := New(config.Config{}, nil, dir, nil)
+
+	req := httptest.NewRequest("POST", "/api/projects/index-all", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "no_projects" {
+		t.Errorf("expected status 'no_projects', got %v", resp["status"])
+	}
+}
+
+func TestIndexAll_NoProjectsDir(t *testing.T) {
 	srv := New(config.Config{}, nil, "", nil)
 
 	req := httptest.NewRequest("POST", "/api/projects/index-all", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["changed_only"] != false {
-		t.Errorf("expected changed_only false, got %v", resp["changed_only"])
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }

@@ -36,7 +36,9 @@ interface RunStatus {
 }
 
 function getTimeAgo(dateStr: string): string {
+  if (!dateStr) return 'never'
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 'unknown'
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)

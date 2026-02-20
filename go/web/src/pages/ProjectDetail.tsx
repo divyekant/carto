@@ -106,6 +106,8 @@ export default function ProjectDetail() {
   }, [name])
 
   function connectSSE(projectName: string) {
+    // Close any existing connection to prevent duplicate listeners
+    eventSourceRef.current?.close()
     const es = new EventSource(`/api/projects/${encodeURIComponent(projectName)}/progress`)
     eventSourceRef.current = es
 
@@ -164,7 +166,8 @@ export default function ProjectDetail() {
         project: project.name,
         incremental,
       }
-      if (moduleFilter.trim()) body.module = moduleFilter.trim()
+      const trimmedModule = moduleFilter.trim()
+      if (trimmedModule) body.module = trimmedModule
 
       const res = await fetch('/api/projects/index', {
         method: 'POST',

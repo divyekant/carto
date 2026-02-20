@@ -37,7 +37,7 @@ func Index(path string, opts IndexOptions) (*IndexResult, error) {
 		apiKey = cfg.AnthropicKey
 	}
 	if apiKey == "" && cfg.LLMProvider != "ollama" {
-		return nil, fmt.Errorf("no API key set")
+		return nil, fmt.Errorf("carto: no API key set; set LLM_API_KEY or ANTHROPIC_API_KEY")
 	}
 
 	llmClient := llm.NewClient(llm.Options{
@@ -69,7 +69,7 @@ func Index(path string, opts IndexOptions) (*IndexResult, error) {
 		ModuleFilter:   opts.Module,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("carto: index: %w", err)
 	}
 
 	return &IndexResult{
@@ -111,7 +111,7 @@ func Query(text string, opts QueryOptions) ([]QueryResult, error) {
 
 	results, err := memoriesClient.Search(text, searchOpts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("carto: query: %w", err)
 	}
 
 	var out []QueryResult
@@ -132,12 +132,12 @@ func Query(text string, opts QueryOptions) ([]QueryResult, error) {
 func Sources(projectName string) (map[string]map[string]string, error) {
 	projectsDir := os.Getenv("PROJECTS_DIR")
 	if projectsDir == "" {
-		return nil, fmt.Errorf("PROJECTS_DIR not set")
+		return nil, fmt.Errorf("carto: PROJECTS_DIR not set")
 	}
 	root := filepath.Join(projectsDir, projectName)
 	yamlCfg, err := sources.LoadSourcesConfig(root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("carto: sources: %w", err)
 	}
 	result := map[string]map[string]string{}
 	if yamlCfg != nil {

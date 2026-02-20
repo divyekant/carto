@@ -745,13 +745,72 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// handleIndexAll accepts a POST to re-index all projects. For now it returns
-// 202 Accepted with the changed_only flag parsed from the query string.
+// handleIndexAll accepts a POST to re-index all projects. It starts indexing
+// each project up to maxIndexAllConcurrency at a time and returns 202 immediately.
 func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
 	changedOnly := r.URL.Query().Get("changed") == "true"
 
+	if s.projectsDir == "" {
+		writeError(w, http.StatusBadRequest, "projects directory not configured")
+		return
+	}
+
+	entries, err := os.ReadDir(s.projectsDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read projects directory")
+		return
+	}
+
+	// Collect indexable projects.
+	var projectPaths []struct{ name, path string }
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectRoot := filepath.Join(s.projectsDir, entry.Name())
+		mf, err := manifest.Load(projectRoot)
+		if err != nil || (mf.IsEmpty() && mf.Project == "") {
+			continue
+		}
+		name := mf.Project
+		if name == "" {
+			name = entry.Name()
+		}
+		projectPaths = append(projectPaths, struct{ name, path string }{name, projectRoot})
+	}
+
+	if len(projectPaths) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "no_projects", "started": 0})
+		return
+	}
+
+	// Launch indexing with a concurrency limiter (max 3 concurrent).
+	const maxConcurrency = 3
+	sem := make(chan struct{}, maxConcurrency)
+
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	started := 0
+	for _, p := range projectPaths {
+		run := s.runs.Start(p.name)
+		if run == nil {
+			continue // already running
+		}
+		started++
+		go func(run *IndexRun, name, path string) {
+			sem <- struct{}{} // acquire
+			defer func() { <-sem }() // release
+			req := indexRequest{Path: path, Project: name}
+			s.runIndex(run, name, path, req, cfg)
+		}(run, p.name, p.path)
+	}
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":       "started",
+		"started":      started,
+		"total":        len(projectPaths),
 		"changed_only": changedOnly,
 	})
 }
