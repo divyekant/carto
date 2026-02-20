@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
 
@@ -541,5 +542,142 @@ func TestSPAFallback(t *testing.T) {
 	}
 	if !strings.Contains(w3.Body.String(), "Carto") {
 		t.Error("SPA fallback should serve index.html")
+	}
+}
+
+func TestGetProjectSources(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	os.MkdirAll(filepath.Join(projDir, ".carto"), 0o755)
+
+	// Write a sources.yaml
+	yamlData := []byte("sources:\n  jira:\n    url: https://acme.atlassian.net\n    project: PROJ\n")
+	os.WriteFile(filepath.Join(projDir, ".carto", "sources.yaml"), yamlData, 0o644)
+
+	cfg := config.Config{GitHubToken: "ghp_test", JiraToken: "jira_test"}
+	srv := New(cfg, nil, tmp, nil)
+
+	req := httptest.NewRequest("GET", "/api/projects/myproj/sources", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Should have sources from YAML
+	srcs := resp["sources"].(map[string]any)
+	jira := srcs["jira"].(map[string]any)
+	if jira["project"] != "PROJ" {
+		t.Errorf("expected jira project PROJ, got %v", jira["project"])
+	}
+
+	// Should have credential availability
+	creds := resp["credentials"].(map[string]any)
+	if creds["github_token"] != true {
+		t.Error("expected github_token true")
+	}
+	if creds["jira_token"] != true {
+		t.Error("expected jira_token true")
+	}
+	if creds["linear_token"] != false {
+		t.Error("expected linear_token false")
+	}
+}
+
+func TestGetProjectSources_NoYAML(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projDir, 0o755)
+
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("GET", "/api/projects/myproj/sources", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	srcs := resp["sources"].(map[string]any)
+	if len(srcs) != 0 {
+		t.Errorf("expected empty sources, got %v", srcs)
+	}
+}
+
+func TestGetProjectSources_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	req := httptest.NewRequest("GET", "/api/projects/nonexistent/sources", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 404 {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestPutProjectSources(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projDir, 0o755)
+
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	body := `{"sources":{"jira":{"url":"https://acme.atlassian.net","project":"PROJ"},"linear":{"team":"ENG"}}}`
+	req := httptest.NewRequest("PUT", "/api/projects/myproj/sources", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the file was written.
+	data, err := os.ReadFile(filepath.Join(projDir, ".carto", "sources.yaml"))
+	if err != nil {
+		t.Fatalf("sources.yaml not created: %v", err)
+	}
+
+	// Parse it back to verify round-trip.
+	parsed, err := sources.ParseSourcesConfig(data)
+	if err != nil {
+		t.Fatalf("failed to parse written YAML: %v", err)
+	}
+	if _, ok := parsed.Sources["jira"]; !ok {
+		t.Error("expected jira in parsed sources")
+	}
+	if _, ok := parsed.Sources["linear"]; !ok {
+		t.Error("expected linear in parsed sources")
+	}
+}
+
+func TestPutProjectSources_EmptyDeletesFile(t *testing.T) {
+	tmp := t.TempDir()
+	projDir := filepath.Join(tmp, "myproj")
+	os.MkdirAll(filepath.Join(projDir, ".carto"), 0o755)
+	os.WriteFile(filepath.Join(projDir, ".carto", "sources.yaml"), []byte("sources:\n  jira:\n    project: X\n"), 0o644)
+
+	srv := New(config.Config{}, nil, tmp, nil)
+
+	body := `{"sources":{}}`
+	req := httptest.NewRequest("PUT", "/api/projects/myproj/sources", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// File should be removed.
+	if _, err := os.Stat(filepath.Join(projDir, ".carto", "sources.yaml")); !os.IsNotExist(err) {
+		t.Error("expected sources.yaml to be deleted for empty sources")
 	}
 }

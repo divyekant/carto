@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -601,5 +603,121 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		Current:     absPath,
 		Parent:      filepath.Dir(absPath),
 		Directories: dirs,
+	})
+}
+
+// putSourcesRequest is the JSON body for PUT /api/projects/{name}/sources.
+type putSourcesRequest struct {
+	Sources map[string]map[string]string `json:"sources"`
+}
+
+// handlePutSources writes .carto/sources.yaml for a project.
+// An empty sources map deletes the file.
+func (s *Server) handlePutSources(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	projPath := filepath.Join(s.projectsDir, name)
+
+	if info, err := os.Stat(projPath); err != nil || !info.IsDir() {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	var body putSourcesRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	cartoDir := filepath.Join(projPath, ".carto")
+	yamlPath := filepath.Join(cartoDir, "sources.yaml")
+
+	// Empty sources → delete the file.
+	if len(body.Sources) == 0 {
+		os.Remove(yamlPath)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+		return
+	}
+
+	// Build YAML content.
+	var buf bytes.Buffer
+	buf.WriteString("sources:\n")
+	// Sort source names for deterministic output.
+	srcNames := make([]string, 0, len(body.Sources))
+	for k := range body.Sources {
+		srcNames = append(srcNames, k)
+	}
+	sort.Strings(srcNames)
+	for _, srcName := range srcNames {
+		settings := body.Sources[srcName]
+		buf.WriteString("  " + srcName + ":\n")
+		// Sort setting keys too.
+		keys := make([]string, 0, len(settings))
+		for k := range settings {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			buf.WriteString("    " + k + ": " + settings[k] + "\n")
+		}
+	}
+
+	os.MkdirAll(cartoDir, 0o755)
+	if err := os.WriteFile(yamlPath, buf.Bytes(), 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to write sources config: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// sourcesResponse is the JSON shape returned by GET /api/projects/{name}/sources.
+type sourcesResponse struct {
+	Sources     map[string]map[string]string `json:"sources"`
+	Credentials map[string]bool             `json:"credentials"`
+}
+
+// handleGetSources returns the parsed .carto/sources.yaml for a project
+// plus boolean availability of global credentials.
+func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	projPath := filepath.Join(s.projectsDir, name)
+
+	if info, err := os.Stat(projPath); err != nil || !info.IsDir() {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	// Parse .carto/sources.yaml (nil if not present).
+	yamlCfg, err := sources.LoadSourcesConfig(projPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read sources config: "+err.Error())
+		return
+	}
+
+	// Build sources map from YAML.
+	srcMap := make(map[string]map[string]string)
+	if yamlCfg != nil {
+		for srcName, entry := range yamlCfg.Sources {
+			srcMap[srcName] = entry.Settings
+		}
+	}
+
+	// Build credential availability from current config.
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	creds := map[string]bool{
+		"github_token": cfg.GitHubToken != "",
+		"jira_token":   cfg.JiraToken != "",
+		"jira_email":   cfg.JiraEmail != "",
+		"linear_token": cfg.LinearToken != "",
+		"notion_token": cfg.NotionToken != "",
+		"slack_token":  cfg.SlackToken != "",
+	}
+
+	writeJSON(w, http.StatusOK, sourcesResponse{
+		Sources:     srcMap,
+		Credentials: creds,
 	})
 }
