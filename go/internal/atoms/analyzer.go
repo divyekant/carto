@@ -40,12 +40,18 @@ type LLMClient interface {
 
 // Analyzer processes code chunks through the fast tier.
 type Analyzer struct {
-	llm LLMClient
+	llm       LLMClient
+	maxTokens int
 }
 
 // NewAnalyzer creates an Analyzer that uses the given LLM client.
-func NewAnalyzer(client LLMClient) *Analyzer {
-	return &Analyzer{llm: client}
+// Optional maxTokens overrides the default 4096 output token limit.
+func NewAnalyzer(client LLMClient, maxTokens ...int) *Analyzer {
+	mt := 4096
+	if len(maxTokens) > 0 && maxTokens[0] > 0 {
+		mt = maxTokens[0]
+	}
+	return &Analyzer{llm: client, maxTokens: mt}
 }
 
 // llmResponse is the expected JSON shape returned by the LLM.
@@ -83,7 +89,7 @@ func (a *Analyzer) AnalyzeChunk(chunk Chunk) (*Atom, error) {
 
 	raw, err := a.llm.CompleteJSON(prompt, llm.TierFast, &llm.CompleteOptions{
 		System:    "You are a code analysis assistant. Respond only with valid JSON.",
-		MaxTokens: 4096,
+		MaxTokens: a.maxTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("atoms: LLM call failed: %w", err)

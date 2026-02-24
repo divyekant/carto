@@ -298,6 +298,97 @@ func Foo() {}
 	}
 }
 
+func TestChunkFile_MaxChunkLinesEnforced(t *testing.T) {
+	// Build a Go file with one function that has 300 lines (well over the 200 default).
+	var code []byte
+	code = append(code, []byte("package main\n\nfunc BigFunction() {\n")...)
+	for i := 0; i < 300; i++ {
+		code = append(code, []byte("\t_ = 1\n")...)
+	}
+	code = append(code, []byte("}\n")...)
+
+	// Chunk with default MaxChunkLines (200).
+	chunks, err := ChunkFile("big.go", code, "go", nil)
+	if err != nil {
+		t.Fatalf("ChunkFile error: %v", err)
+	}
+
+	if len(chunks) == 0 {
+		t.Fatal("expected at least 1 chunk")
+	}
+
+	for _, c := range chunks {
+		lines := countLines(c.Code)
+		if lines > defaultMaxChunkLines {
+			t.Errorf("chunk %q has %d lines, exceeds max %d", c.Name, lines, defaultMaxChunkLines)
+		}
+	}
+}
+
+func TestChunkFile_MaxChunkLinesCustom(t *testing.T) {
+	// Build a Go file with a function that has 100 lines.
+	var code []byte
+	code = append(code, []byte("package main\n\nfunc MediumFunction() {\n")...)
+	for i := 0; i < 100; i++ {
+		code = append(code, []byte("\t_ = 1\n")...)
+	}
+	code = append(code, []byte("}\n")...)
+
+	// Chunk with a custom limit of 50 lines.
+	chunks, err := ChunkFile("medium.go", code, "go", &ChunkOptions{MaxChunkLines: 50})
+	if err != nil {
+		t.Fatalf("ChunkFile error: %v", err)
+	}
+
+	if len(chunks) == 0 {
+		t.Fatal("expected at least 1 chunk")
+	}
+
+	for _, c := range chunks {
+		lines := countLines(c.Code)
+		if lines > 50 {
+			t.Errorf("chunk %q has %d lines, exceeds custom max 50", c.Name, lines)
+		}
+	}
+}
+
+func TestChunkFile_WholeFileFallbackRespectMaxLines(t *testing.T) {
+	// Unknown language file that exceeds the default limit.
+	var code []byte
+	for i := 0; i < 300; i++ {
+		code = append(code, []byte("line of config\n")...)
+	}
+
+	chunks, err := ChunkFile("big.yaml", code, "yaml", nil)
+	if err != nil {
+		t.Fatalf("ChunkFile error: %v", err)
+	}
+
+	for _, c := range chunks {
+		lines := countLines(c.Code)
+		if lines > defaultMaxChunkLines {
+			t.Errorf("whole-file chunk %q has %d lines, exceeds max %d", c.Name, lines, defaultMaxChunkLines)
+		}
+	}
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := 1
+	for _, c := range s {
+		if c == '\n' {
+			n++
+		}
+	}
+	// Don't count trailing newline as an extra line.
+	if len(s) > 0 && s[len(s)-1] == '\n' {
+		n--
+	}
+	return n
+}
+
 // assertChunk is a test helper that checks common Chunk fields.
 func assertChunk(t *testing.T, c Chunk, name, kind, language string, startLine, endLine int) {
 	t.Helper()

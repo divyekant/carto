@@ -43,6 +43,8 @@ type Config struct {
 	LogFn          func(level, msg string)              // optional log callback
 	Incremental    bool                                 // use manifest for incremental indexing
 	ModuleFilter   string                               // optional: index only this module
+	FastMaxTokens  int                                  // optional: override fast-tier max tokens (default 4096)
+	DeepMaxTokens  int                                  // optional: override deep-tier max tokens (default 8192)
 }
 
 // Result holds the output of a full pipeline run.
@@ -177,7 +179,7 @@ func Run(cfg Config) (*Result, error) {
 		atoms  []*atoms.Atom
 	}
 
-	atomAnalyzer := atoms.NewAnalyzer(cfg.LLMClient)
+	atomAnalyzer := atoms.NewAnalyzer(cfg.LLMClient, cfg.FastMaxTokens)
 	moduleAtomsList := make([]moduleAtoms, len(work))
 	var atomErrors []error
 
@@ -317,7 +319,7 @@ func Run(cfg Config) (*Result, error) {
 
 	// ── Phase 4: Deep Analysis ─────────────────────────────────────────
 	logFn("info", fmt.Sprintf("Running deep analysis on %d module(s)...", len(work)))
-	deepAnalyzer := analyzer.NewDeepAnalyzer(cfg.LLMClient)
+	deepAnalyzer := analyzer.NewDeepAnalyzer(cfg.LLMClient, cfg.DeepMaxTokens)
 
 	// Build ModuleInput for each module.
 	inputs := make([]analyzer.ModuleInput, len(work))
@@ -360,6 +362,14 @@ func Run(cfg Config) (*Result, error) {
 
 	for i, w := range work {
 		modName := w.module.Name
+
+		// For non-incremental runs, clear existing module data before storing
+		// to prevent duplicate entries accumulating in Memories.
+		if !cfg.Incremental {
+			if err := store.ClearModule(modName); err != nil {
+				log.Printf("pipeline: warning: failed to clear module %s before re-storing: %v", modName, err)
+			}
+		}
 
 		// Store atoms.
 		if atomsJSON, err := json.Marshal(moduleAtomsList[i].atoms); err == nil {

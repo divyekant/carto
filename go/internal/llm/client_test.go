@@ -272,6 +272,89 @@ func TestClient_CompleteJSON(t *testing.T) {
 	}
 }
 
+func TestClient_RetryOn429(t *testing.T) {
+	var attempts atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n <= 2 {
+			// First 2 requests return 429.
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+			return
+		}
+		// Third request succeeds.
+		resp := map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "success"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Options{APIKey: "sk-test", BaseURL: srv.URL})
+
+	result, err := c.Complete("test", TierFast, nil)
+	if err != nil {
+		t.Fatalf("Complete returned error after retries: %v", err)
+	}
+
+	if result != "success" {
+		t.Errorf("got %q, want %q", result, "success")
+	}
+
+	if got := attempts.Load(); got != 3 {
+		t.Errorf("expected 3 attempts (2 retries + 1 success), got %d", got)
+	}
+}
+
+func TestClient_RetryExhausted(t *testing.T) {
+	var attempts atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Options{APIKey: "sk-test", BaseURL: srv.URL})
+
+	_, err := c.Complete("test", TierFast, nil)
+	if err == nil {
+		t.Fatal("expected error after retries exhausted")
+	}
+
+	if got := attempts.Load(); got < 3 {
+		t.Errorf("expected at least 3 attempts, got %d", got)
+	}
+}
+
+func TestClient_NoRetryOnOtherErrors(t *testing.T) {
+	var attempts atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"type":"error","error":{"type":"invalid_request","message":"bad request"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Options{APIKey: "sk-test", BaseURL: srv.URL})
+
+	_, err := c.Complete("test", TierFast, nil)
+	if err == nil {
+		t.Fatal("expected error on 400")
+	}
+
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("should not retry on 400; got %d attempts, want 1", got)
+	}
+}
+
 func TestClient_DeepModel(t *testing.T) {
 	var gotReq apiRequest
 

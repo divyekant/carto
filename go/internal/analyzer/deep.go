@@ -55,14 +55,24 @@ type SystemSynthesis struct {
 	Patterns  []string `json:"patterns"`
 }
 
+// maxPromptChars is the approximate character budget for module analysis prompts.
+// ~100K chars ≈ ~25K tokens, well within model context limits.
+const maxPromptChars = 100000
+
 // DeepAnalyzer runs deep-tier analysis on modules and system-wide.
 type DeepAnalyzer struct {
-	llm LLMClient
+	llm       LLMClient
+	maxTokens int
 }
 
 // NewDeepAnalyzer creates a DeepAnalyzer that uses the given LLM client.
-func NewDeepAnalyzer(client LLMClient) *DeepAnalyzer {
-	return &DeepAnalyzer{llm: client}
+// Optional maxTokens overrides the default 8192 output token limit.
+func NewDeepAnalyzer(client LLMClient, maxTokens ...int) *DeepAnalyzer {
+	mt := 8192
+	if len(maxTokens) > 0 && maxTokens[0] > 0 {
+		mt = maxTokens[0]
+	}
+	return &DeepAnalyzer{llm: client, maxTokens: mt}
 }
 
 // buildModulePrompt constructs the user prompt for per-module analysis.
@@ -125,7 +135,13 @@ func buildModulePrompt(input ModuleInput) string {
 - "module_intent": a 1-3 sentence summary of the module's purpose
 `)
 
-	return b.String()
+	// Truncate if prompt exceeds the character budget.
+	result := b.String()
+	if len(result) > maxPromptChars {
+		result = result[:maxPromptChars]
+	}
+
+	return result
 }
 
 // AnalyzeModule sends a single module's data to the deep tier and returns wiring,
@@ -135,7 +151,7 @@ func (d *DeepAnalyzer) AnalyzeModule(module ModuleInput) (*ModuleAnalysis, error
 
 	raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
 		System:    "You are a software architecture analyst. Analyze this module and respond with JSON.",
-		MaxTokens: 8192,
+		MaxTokens: d.maxTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("analyzer: LLM call failed for module %q: %w", module.Name, err)
@@ -196,7 +212,7 @@ func (d *DeepAnalyzer) SynthesizeSystem(modules []ModuleAnalysis) (*SystemSynthe
 
 	raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
 		System:    "You are a senior software architect. Synthesize these module analyses into a system-level understanding. Respond with JSON.",
-		MaxTokens: 8192,
+		MaxTokens: d.maxTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("analyzer: LLM call failed for system synthesis: %w", err)

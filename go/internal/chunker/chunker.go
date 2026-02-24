@@ -43,10 +43,15 @@ func ChunkFile(path string, code []byte, language string, opts *ChunkOptions) ([
 		return nil, nil
 	}
 
+	maxLines := defaultMaxChunkLines
+	if opts != nil && opts.MaxChunkLines > 0 {
+		maxLines = opts.MaxChunkLines
+	}
+
 	langPtr := languagePtr(language)
 	if langPtr == nil {
 		// Unsupported language: return entire file as a single module chunk.
-		return []Chunk{wholeFileChunk(path, code, language)}, nil
+		return enforceMaxLines([]Chunk{wholeFileChunk(path, code, language)}, maxLines), nil
 	}
 
 	chunks, err := chunkWithTreeSitter(path, code, language, langPtr)
@@ -56,10 +61,10 @@ func ChunkFile(path string, code []byte, language string, opts *ChunkOptions) ([
 
 	if len(chunks) == 0 {
 		// Parseable language but no extractable chunks -- return whole file.
-		return []Chunk{wholeFileChunk(path, code, language)}, nil
+		return enforceMaxLines([]Chunk{wholeFileChunk(path, code, language)}, maxLines), nil
 	}
 
-	return chunks, nil
+	return enforceMaxLines(chunks, maxLines), nil
 }
 
 // languagePtr returns the Tree-sitter language pointer for a given language
@@ -290,6 +295,20 @@ func extractLexicalDeclName(node *tree_sitter.Node, code []byte) string {
 		}
 	}
 	return ""
+}
+
+// enforceMaxLines truncates any chunk whose Code exceeds maxLines.
+// Oversized chunks have their Code trimmed to the first maxLines lines,
+// keeping the chunk metadata intact so the LLM receives a manageable input.
+func enforceMaxLines(chunks []Chunk, maxLines int) []Chunk {
+	for i := range chunks {
+		lines := strings.SplitAfter(chunks[i].Code, "\n")
+		if len(lines) > maxLines {
+			chunks[i].Code = strings.Join(lines[:maxLines], "")
+			chunks[i].EndLine = chunks[i].StartLine + maxLines - 1
+		}
+	}
+	return chunks
 }
 
 // wholeFileChunk returns a single Chunk covering the entire file.

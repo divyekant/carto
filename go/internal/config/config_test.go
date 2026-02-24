@@ -33,6 +33,29 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_TokenLimitDefaults(t *testing.T) {
+	cfg := Load()
+	if cfg.FastMaxTokens != 4096 {
+		t.Errorf("expected default FastMaxTokens 4096, got %d", cfg.FastMaxTokens)
+	}
+	if cfg.DeepMaxTokens != 8192 {
+		t.Errorf("expected default DeepMaxTokens 8192, got %d", cfg.DeepMaxTokens)
+	}
+}
+
+func TestLoadConfig_TokenLimitEnvOverrides(t *testing.T) {
+	t.Setenv("CARTO_FAST_MAX_TOKENS", "8192")
+	t.Setenv("CARTO_DEEP_MAX_TOKENS", "16384")
+
+	cfg := Load()
+	if cfg.FastMaxTokens != 8192 {
+		t.Errorf("expected FastMaxTokens 8192, got %d", cfg.FastMaxTokens)
+	}
+	if cfg.DeepMaxTokens != 16384 {
+		t.Errorf("expected DeepMaxTokens 16384, got %d", cfg.DeepMaxTokens)
+	}
+}
+
 func TestResolveURL_NonDocker(t *testing.T) {
 	url := ResolveURL("http://localhost:8900")
 	if url != "http://localhost:8900" {

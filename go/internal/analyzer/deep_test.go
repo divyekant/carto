@@ -363,6 +363,44 @@ func TestAnalyzeModule_EmptyAtoms(t *testing.T) {
 	}
 }
 
+func TestBuildModulePrompt_TruncatesLargeInput(t *testing.T) {
+	// Create a module with many atoms that would exceed the prompt budget.
+	var largeAtoms []*atoms.Atom
+	for i := 0; i < 500; i++ {
+		largeAtoms = append(largeAtoms, &atoms.Atom{
+			Name:     fmt.Sprintf("Function%d", i),
+			Kind:     "function",
+			FilePath: fmt.Sprintf("pkg/file%d.go", i),
+			Summary:  strings.Repeat("This is a summary sentence. ", 10),
+			Imports:  []string{"fmt", "net/http", "encoding/json"},
+			Exports:  []string{fmt.Sprintf("Function%d", i)},
+		})
+	}
+
+	input := ModuleInput{
+		Name:  "huge-module",
+		Path:  "internal/huge",
+		Atoms: largeAtoms,
+	}
+
+	prompt := buildModulePrompt(input)
+
+	// The prompt should be capped at a reasonable size.
+	// With 500 atoms, each ~300 chars of summary+meta, the uncapped prompt would be ~150KB.
+	// We expect it to be capped at maxPromptChars (100000 chars ≈ ~25K tokens).
+	if len(prompt) > maxPromptChars+1000 { // small margin for the instruction text
+		t.Errorf("prompt length %d exceeds budget %d", len(prompt), maxPromptChars)
+	}
+
+	// The prompt should still contain the module name and some atoms.
+	if !strings.Contains(prompt, "huge-module") {
+		t.Error("prompt should contain module name")
+	}
+	if !strings.Contains(prompt, "Function0") {
+		t.Error("prompt should contain at least the first atom")
+	}
+}
+
 func TestAnalyzeModules_SkipsErrors(t *testing.T) {
 	// Error on the second call (index 1).
 	mock := &errorLLM{

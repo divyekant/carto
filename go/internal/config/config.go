@@ -17,6 +17,8 @@ type Config struct {
 	LLMProvider   string
 	LLMApiKey     string
 	LLMBaseURL    string
+	FastMaxTokens int
+	DeepMaxTokens int
 	GitHubToken   string
 	JiraToken     string
 	JiraEmail     string
@@ -58,6 +60,8 @@ func Load() Config {
 		FastModel:     envOr("CARTO_FAST_MODEL", "claude-haiku-4-5-20251001"),
 		DeepModel:     envOr("CARTO_DEEP_MODEL", "claude-opus-4-6"),
 		MaxConcurrent: envOrInt("CARTO_MAX_CONCURRENT", 10),
+		FastMaxTokens: envOrInt("CARTO_FAST_MAX_TOKENS", 4096),
+		DeepMaxTokens: envOrInt("CARTO_DEEP_MAX_TOKENS", 8192),
 		LLMProvider:   envOr("LLM_PROVIDER", "anthropic"),
 		LLMApiKey:     os.Getenv("LLM_API_KEY"),
 		LLMBaseURL:    os.Getenv("LLM_BASE_URL"),

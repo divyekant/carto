@@ -451,8 +451,10 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		LogFn: func(level, msg string) {
 			run.SendLog(level, msg)
 		},
-		Incremental:  req.Incremental,
-		ModuleFilter: req.Module,
+		Incremental:   req.Incremental,
+		ModuleFilter:  req.Module,
+		FastMaxTokens: cfg.FastMaxTokens,
+		DeepMaxTokens: cfg.DeepMaxTokens,
 	})
 	if err != nil {
 		run.SendError(err.Error())

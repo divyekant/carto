@@ -69,10 +69,11 @@ type storedMemory struct {
 }
 
 type mockMemories struct {
-	mu       sync.Mutex
-	memories []storedMemory
-	nextID   int
-	healthy  bool
+	mu        sync.Mutex
+	memories  []storedMemory
+	deletions []string
+	nextID    int
+	healthy   bool
 }
 
 func (m *mockMemories) Health() (bool, error) { return m.healthy, nil }
@@ -104,7 +105,18 @@ func (m *mockMemories) ListBySource(source string, limit int) ([]storage.SearchR
 }
 
 func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deletions = append(m.deletions, prefix)
 	return 0, nil
+}
+
+func (m *mockMemories) getDeletions() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]string, len(m.deletions))
+	copy(cp, m.deletions)
+	return cp
 }
 
 func (m *mockMemories) getMemories() []storedMemory {
@@ -519,6 +531,65 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 
 	if opCount.Load() < 2 {
 		t.Error("expected progress callbacks from both concurrent runs")
+	}
+}
+
+func TestRun_NonIncrementalClearsOldData(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	// First run: non-incremental. Stores data.
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	memoriesAfterFirst := len(mem.getMemories())
+	if memoriesAfterFirst == 0 {
+		t.Fatal("first run stored no memories")
+	}
+
+	// Reset deletion tracking.
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.mu.Unlock()
+
+	// Second run: non-incremental (Incremental=false, the default).
+	// Should clear old module data before re-storing.
+	_, err = Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	// Verify that DeleteBySource was called to clear old data.
+	deletions := mem.getDeletions()
+	if len(deletions) == 0 {
+		t.Error("non-incremental re-index did not clear old module data before storing")
+	}
+
+	// Each module should have had its layers cleared.
+	// The test project has one module; we expect deletion calls for it.
+	foundModuleClear := false
+	for _, d := range deletions {
+		if strings.Contains(d, "test-project") {
+			foundModuleClear = true
+			break
+		}
+	}
+	if !foundModuleClear {
+		t.Errorf("expected deletion for project 'test-project', got deletions: %v", deletions)
 	}
 }
 

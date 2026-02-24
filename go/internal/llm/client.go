@@ -243,33 +243,77 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 		req.Header.Set("X-Api-Key", c.opts.APIKey)
 	}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("llm: send request: %w", err)
-	}
-	defer resp.Body.Close()
+	const maxRetries = 3
+	var lastErr error
 
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("llm: read response: %w", err)
-	}
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 1s, 2s, 4s...
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			time.Sleep(backoff)
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, string(respBytes))
-	}
-
-	var apiResp apiResponse
-	if err := json.Unmarshal(respBytes, &apiResp); err != nil {
-		return "", fmt.Errorf("llm: unmarshal response: %w", err)
-	}
-
-	for _, block := range apiResp.Content {
-		if block.Type == "text" {
-			return block.Text, nil
+			// Rebuild the request body since the reader was consumed.
+			req, err = http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+			if err != nil {
+				return "", fmt.Errorf("llm: create request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Anthropic-Version", "2023-06-01")
+			if c.opts.IsOAuth {
+				token := c.opts.APIKey
+				if c.oauth != nil {
+					c.oauth.mu.Lock()
+					token = c.oauth.accessToken
+					c.oauth.mu.Unlock()
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
+				beta := OAuthBeta
+				if tier == TierDeep {
+					beta += "," + ThinkingBeta
+				}
+				req.Header.Set("Anthropic-Beta", beta)
+				req.Header.Set("User-Agent", UserAgent)
+				req.Header.Del("X-Api-Key")
+			} else {
+				req.Header.Set("X-Api-Key", c.opts.APIKey)
+			}
 		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("llm: send request: %w", err)
+		}
+
+		respBytes, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("llm: read response: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			lastErr = fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, string(respBytes))
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, string(respBytes))
+		}
+
+		var apiResp apiResponse
+		if err := json.Unmarshal(respBytes, &apiResp); err != nil {
+			return "", fmt.Errorf("llm: unmarshal response: %w", err)
+		}
+
+		for _, block := range apiResp.Content {
+			if block.Type == "text" {
+				return block.Text, nil
+			}
+		}
+
+		return "", fmt.Errorf("llm: no text block in response")
 	}
 
-	return "", fmt.Errorf("llm: no text block in response")
+	return "", lastErr
 }
 
 // CompleteJSON calls Complete and extracts the first JSON object from the
