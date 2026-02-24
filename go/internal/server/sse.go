@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,11 +28,14 @@ type IndexResult struct {
 
 // IndexRun tracks a single in-flight indexing run for a project.
 type IndexRun struct {
+	Ctx       context.Context    // passed to pipeline.Run for cancellation
+	Cancel    context.CancelFunc // call to stop the run
 	events    chan sseEvent
 	done      chan struct{}
 	mu        sync.Mutex
 	lastEvent *sseEvent // buffered final event for late-connecting clients
 	finished  bool
+	stopped   bool // true if cancelled via Stop
 
 	// Stored result/error for the runs API so the UI can restore state.
 	FinalResult *IndexResult
@@ -85,6 +89,20 @@ func (r *IndexRun) SendError(msg string) {
 	r.mu.Lock()
 	r.lastEvent = &ev
 	r.FinalError = msg
+	r.mu.Unlock()
+	select {
+	case r.events <- ev:
+	default:
+	}
+}
+
+// SendStopped sends a stopped event when the run is cancelled by user.
+func (r *IndexRun) SendStopped() {
+	data, _ := json.Marshal(map[string]string{"message": "Indexing stopped by user"})
+	ev := sseEvent{Event: "stopped", Data: string(data)}
+	r.mu.Lock()
+	r.lastEvent = &ev
+	r.stopped = true
 	r.mu.Unlock()
 	select {
 	case r.events <- ev:
@@ -194,7 +212,10 @@ func (m *RunManager) Start(project string) *IndexRun {
 		// Old run finished — replace it.
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	run := &IndexRun{
+		Ctx:    ctx,
+		Cancel: cancel,
 		events: make(chan sseEvent, 100),
 		done:   make(chan struct{}),
 	}
@@ -216,7 +237,9 @@ func (m *RunManager) Finish(project string) {
 
 	// Snapshot for persistent last-run tracking.
 	status := RunStatus{Project: project}
-	if run.FinalError != "" {
+	if run.stopped {
+		status.Status = "stopped"
+	} else if run.FinalError != "" {
 		status.Status = "error"
 		status.Error = run.FinalError
 	} else if run.FinalResult != nil {
@@ -239,6 +262,24 @@ func (m *RunManager) Finish(project string) {
 		delete(m.runs, project)
 		m.mu.Unlock()
 	}()
+}
+
+// Stop cancels the active run for a project. Returns false if no active run.
+func (m *RunManager) Stop(project string) bool {
+	m.mu.Lock()
+	run, exists := m.runs[project]
+	m.mu.Unlock()
+	if !exists {
+		return false
+	}
+	run.mu.Lock()
+	done := run.finished
+	run.mu.Unlock()
+	if done {
+		return false
+	}
+	run.Cancel()
+	return true
 }
 
 // Get returns the active run for a project, or nil if none is active.
@@ -269,6 +310,8 @@ func (m *RunManager) ListRuns() []RunStatus {
 		status := RunStatus{Project: name}
 		if !run.finished {
 			status.Status = "running"
+		} else if run.stopped {
+			status.Status = "stopped"
 		} else if run.FinalError != "" {
 			status.Status = "error"
 			status.Error = run.FinalError

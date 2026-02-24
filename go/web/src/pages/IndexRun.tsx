@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { ProgressBar } from '@/components/ProgressBar'
 
-type PageState = 'idle' | 'starting' | 'running' | 'complete' | 'error'
+type PageState = 'idle' | 'starting' | 'running' | 'complete' | 'error' | 'stopped'
 
 interface ProgressData {
   phase: string
@@ -42,6 +42,8 @@ export default function IndexRun() {
   const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [module, setModule] = useState('')
   const [incremental, setIncremental] = useState(false)
+  const [projectName, setProjectName] = useState('')
+  const [stopping, setStopping] = useState(false)
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
   const [result, setResult] = useState<CompleteData | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -75,6 +77,7 @@ export default function IndexRun() {
         if (runs.length > 0) {
           const lastRun = runs[0]
           if (lastRun.status === 'running') {
+            setProjectName(lastRun.project)
             setPageState('running')
             setLogs([{ level: 'info', message: 'Reconnecting to active run...', timestamp: Date.now() }])
             connectSSE(lastRun.project)
@@ -84,6 +87,8 @@ export default function IndexRun() {
           } else if (lastRun.status === 'error' && lastRun.error) {
             setErrorMsg(lastRun.error)
             setPageState('error')
+          } else if (lastRun.status === 'stopped') {
+            setPageState('stopped')
           }
         }
       })
@@ -99,6 +104,8 @@ export default function IndexRun() {
     setResult(null)
     setErrorMsg('')
     setLogs([])
+    setStopping(false)
+    setProjectName('')
   }
 
   async function startIndexing() {
@@ -131,11 +138,12 @@ export default function IndexRun() {
       }
 
       const data = await res.json()
-      const projectName = data.project
+      const name = data.project
+      setProjectName(name)
 
       setPageState('running')
       toast.success('Indexing started')
-      connectSSE(projectName)
+      connectSSE(name)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err))
       setPageState('error')
@@ -178,6 +186,14 @@ export default function IndexRun() {
       es.close()
     })
 
+    es.addEventListener('stopped', () => {
+      setLogs(prev => [...prev, { level: 'warn', message: 'Indexing stopped by user', timestamp: Date.now() }])
+      setPageState('stopped')
+      setStopping(false)
+      toast('Indexing stopped')
+      es.close()
+    })
+
     es.onerror = () => {
       if (stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
@@ -185,6 +201,17 @@ export default function IndexRun() {
         setPageState('error')
       }
       es.close()
+    }
+  }
+
+  async function stopIndexing() {
+    if (!projectName) return
+    setStopping(true)
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(projectName)}/stop`, { method: 'POST' })
+    } catch {
+      setStopping(false)
+      toast.error('Failed to stop indexing')
     }
   }
 
@@ -269,13 +296,33 @@ export default function IndexRun() {
         <p className="text-muted-foreground text-sm">Starting indexing...</p>
       )}
 
+      {state === 'stopped' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-xs">Stopped</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">Indexing was stopped by user</p>
+          <Button variant="secondary" size="sm" onClick={reset}>Index Again</Button>
+        </div>
+      )}
+
       {(state === 'running' || state === 'complete' || state === 'error') && (
         <div className="space-y-3">
           <div className="flex gap-3">
             {/* Left: progress / result */}
             <div className="flex-1 min-w-0">
               {state === 'running' && (
-                <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+                <div className="space-y-2">
+                  <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={stopIndexing}
+                    disabled={stopping}
+                  >
+                    {stopping ? 'Stopping...' : 'Stop'}
+                  </Button>
+                </div>
               )}
 
               {state === 'complete' && result && (

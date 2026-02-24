@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -169,33 +168,18 @@ func TestMemoriesClient_Search(t *testing.T) {
 }
 
 func TestMemoriesClient_DeleteBySource(t *testing.T) {
-	var deletedIDs []string
+	var receivedBody map[string]any
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/memories":
-			source := r.URL.Query().Get("source")
-			if source != "proj/old" {
-				t.Errorf("expected source 'proj/old', got '%s'", source)
-			}
-			resp := map[string]any{
-				"memories": []map[string]any{
-					{"id": 10, "text": "old one", "score": 1.0, "source": "proj/old"},
-					{"id": 20, "text": "old two", "score": 1.0, "source": "proj/old"},
-					{"id": 30, "text": "old three", "score": 1.0, "source": "proj/old"},
-				},
-			}
-			json.NewEncoder(w).Encode(resp)
-
-		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/memory/"):
-			id := strings.TrimPrefix(r.URL.Path, "/memory/")
-			deletedIDs = append(deletedIDs, id)
-			w.WriteHeader(http.StatusOK)
-
-		default:
+		if r.Method != http.MethodPost || r.URL.Path != "/memory/delete-by-prefix" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"count": 15})
 	}))
 	defer srv.Close()
 
@@ -205,17 +189,115 @@ func TestMemoriesClient_DeleteBySource(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if count != 3 {
-		t.Errorf("expected 3 deleted, got %d", count)
-	}
-	if len(deletedIDs) != 3 {
-		t.Fatalf("expected 3 delete calls, got %d", len(deletedIDs))
+	if count != 15 {
+		t.Errorf("expected 15 deleted, got %d", count)
 	}
 
-	expected := []string{"10", "20", "30"}
-	for i, id := range expected {
-		if deletedIDs[i] != id {
-			t.Errorf("expected delete ID %s at position %d, got %s", id, i, deletedIDs[i])
+	if receivedBody["source_prefix"] != "proj/old" {
+		t.Errorf("expected source_prefix 'proj/old', got '%v'", receivedBody["source_prefix"])
+	}
+}
+
+func TestMemoriesClient_Count(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/memories/count" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+
+		source := r.URL.Query().Get("source")
+		if source != "carto/proj/" {
+			t.Errorf("expected source 'carto/proj/', got '%s'", source)
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{"count": 42})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	count, err := client.Count("carto/proj/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if count != 42 {
+		t.Errorf("expected count 42, got %d", count)
+	}
+}
+
+func TestMemoriesClient_ListBySource_WithOffset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/memories" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		source := r.URL.Query().Get("source")
+		limit := r.URL.Query().Get("limit")
+		offset := r.URL.Query().Get("offset")
+
+		if source != "carto/proj/mod/layer:atoms" {
+			t.Errorf("expected source 'carto/proj/mod/layer:atoms', got '%s'", source)
+		}
+		if limit != "50" {
+			t.Errorf("expected limit '50', got '%s'", limit)
+		}
+		if offset != "100" {
+			t.Errorf("expected offset '100', got '%s'", offset)
+		}
+
+		resp := map[string]any{
+			"memories": []map[string]any{
+				{"id": 101, "text": "atom 101", "score": 1.0, "source": source},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	results, err := client.ListBySource("carto/proj/mod/layer:atoms", 50, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != 101 {
+		t.Errorf("expected id 101, got %d", results[0].ID)
+	}
+}
+
+func TestMemoriesClient_Search_WithSourcePrefix(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if body["source_prefix"] != "carto/proj/" {
+			t.Errorf("expected source_prefix 'carto/proj/', got '%v'", body["source_prefix"])
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": 1, "text": "match", "score": 0.9, "source": "carto/proj/a"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	results, err := client.Search("test", SearchOptions{
+		K:            5,
+		SourcePrefix: "carto/proj/",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 }

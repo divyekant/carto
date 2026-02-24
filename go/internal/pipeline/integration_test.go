@@ -114,8 +114,12 @@ func (f *integrationMemories) Search(query string, opts storage.SearchOptions) (
 	return nil, nil
 }
 
-func (f *integrationMemories) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
+func (f *integrationMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
 	return nil, nil
+}
+
+func (f *integrationMemories) Count(sourcePrefix string) (int, error) {
+	return 0, nil
 }
 
 func (f *integrationMemories) DeleteBySource(prefix string) (int, error) {
@@ -285,6 +289,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		SourceRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true, // enable manifest creation
+		SkipSkillFiles: true, // avoid CLAUDE.md/.cursorrules interfering with incremental re-run
 		ProgressFn: func(phase string, done, total int) {
 			progressMu.Lock()
 			defer progressMu.Unlock()
@@ -406,6 +411,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		SourceRegistry: registry,
 		MaxWorkers:     2,
 		Incremental:    true,
+		SkipSkillFiles: true,
 	})
 	if err != nil {
 		t.Fatalf("incremental run returned fatal error: %v", err)

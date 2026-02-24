@@ -37,7 +37,7 @@ func (m *mockMemories) Search(query string, opts SearchOptions) ([]SearchResult,
 	return nil, nil
 }
 
-func (m *mockMemories) ListBySource(source string, limit int) ([]SearchResult, error) {
+func (m *mockMemories) ListBySource(source string, limit, offset int) ([]SearchResult, error) {
 	if results, ok := m.results[source]; ok {
 		return results, nil
 	}
@@ -47,6 +47,16 @@ func (m *mockMemories) ListBySource(source string, limit int) ([]SearchResult, e
 func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	m.deleted = append(m.deleted, prefix)
 	return 0, nil
+}
+
+func (m *mockMemories) Count(sourcePrefix string) (int, error) {
+	count := 0
+	for source, results := range m.results {
+		if len(sourcePrefix) == 0 || strings.HasPrefix(source, sourcePrefix) {
+			count += len(results)
+		}
+	}
+	return count, nil
 }
 
 func TestSourceTag(t *testing.T) {
@@ -262,16 +272,14 @@ func TestClearModule(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(mock.deleted) != len(allLayers) {
-		t.Fatalf("expected %d delete calls, got %d", len(allLayers), len(mock.deleted))
+	// Should use a single bulk delete with the module prefix.
+	if len(mock.deleted) != 1 {
+		t.Fatalf("expected 1 delete call, got %d", len(mock.deleted))
 	}
 
-	// Verify each layer was deleted with the correct source tag.
-	for i, layer := range allLayers {
-		expected := fmt.Sprintf("carto/proj/auth/layer:%s", layer)
-		if mock.deleted[i] != expected {
-			t.Errorf("delete[%d]: expected %q, got %q", i, expected, mock.deleted[i])
-		}
+	expected := "carto/proj/auth/"
+	if mock.deleted[0] != expected {
+		t.Errorf("expected delete prefix %q, got %q", expected, mock.deleted[0])
 	}
 }
 

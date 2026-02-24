@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,10 +31,10 @@ type SearchResult struct {
 
 // SearchOptions controls search behaviour.
 type SearchOptions struct {
-	K         int     `json:"k,omitempty"`
-	Threshold float64 `json:"threshold,omitempty"`
-	Hybrid    bool    `json:"hybrid,omitempty"`
-	Source    string  `json:"source,omitempty"`
+	K            int     `json:"k,omitempty"`
+	Threshold    float64 `json:"threshold,omitempty"`
+	Hybrid       bool    `json:"hybrid,omitempty"`
+	SourcePrefix string  `json:"source_prefix,omitempty"`
 }
 
 // MemoriesClient talks to the Memories REST API.
@@ -49,7 +50,7 @@ func NewMemoriesClient(baseURL, apiKey string) *MemoriesClient {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		http: http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 	}
 }
@@ -114,14 +115,21 @@ func (c *MemoriesClient) AddMemory(m Memory) (int, error) {
 
 const batchSize = 500
 
-// AddBatch stores memories in chunks of 500.
+// AddBatch stores memories in chunks of batchSize. The Memories server handles
+// internal chunking. Continues on individual batch failures and returns the
+// first error encountered.
 func (c *MemoriesClient) AddBatch(memories []Memory) error {
+	total := (len(memories) + batchSize - 1) / batchSize
+	var firstErr error
 	for i := 0; i < len(memories); i += batchSize {
 		end := i + batchSize
 		if end > len(memories) {
 			end = len(memories)
 		}
 		batch := memories[i:end]
+		batchNum := i/batchSize + 1
+
+		log.Printf("storage: storing batch %d/%d (%d memories)", batchNum, total, len(batch))
 
 		payload := struct {
 			Memories []Memory `json:"memories"`
@@ -129,16 +137,23 @@ func (c *MemoriesClient) AddBatch(memories []Memory) error {
 
 		resp, err := c.request(http.MethodPost, "/memory/add-batch", payload)
 		if err != nil {
-			return fmt.Errorf("batch %d: %w", i/batchSize, err)
+			log.Printf("storage: warning: batch %d/%d failed: %v", batchNum, total, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("batch %d: %w", batchNum, err)
+			}
+			continue
 		}
-		defer resp.Body.Close()
+		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			text, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("batch %d: memories API error %d: %s", i/batchSize, resp.StatusCode, text)
+			log.Printf("storage: warning: batch %d/%d returned %d: %s", batchNum, total, resp.StatusCode, text)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // Search queries the Memories index with the given options.
@@ -149,17 +164,17 @@ func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResul
 	}
 
 	payload := struct {
-		Query     string  `json:"query"`
-		K         int     `json:"k"`
-		Threshold float64 `json:"threshold,omitempty"`
-		Hybrid    bool    `json:"hybrid"`
-		Source    string  `json:"source,omitempty"`
+		Query        string  `json:"query"`
+		K            int     `json:"k"`
+		Threshold    float64 `json:"threshold,omitempty"`
+		Hybrid       bool    `json:"hybrid"`
+		SourcePrefix string  `json:"source_prefix,omitempty"`
 	}{
-		Query:     query,
-		K:         k,
-		Threshold: opts.Threshold,
-		Hybrid:    opts.Hybrid,
-		Source:    opts.Source,
+		Query:        query,
+		K:            k,
+		Threshold:    opts.Threshold,
+		Hybrid:       opts.Hybrid,
+		SourcePrefix: opts.SourcePrefix,
 	}
 
 	resp, err := c.request(http.MethodPost, "/search", payload)
@@ -182,12 +197,14 @@ func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResul
 	return result.Results, nil
 }
 
-// ListBySource fetches memories matching a source prefix.
-func (c *MemoriesClient) ListBySource(source string, limit int) ([]SearchResult, error) {
+// ListBySource fetches memories matching a source prefix with pagination.
+func (c *MemoriesClient) ListBySource(source string, limit, offset int) ([]SearchResult, error) {
 	if limit == 0 {
-		limit = 50
+		limit = 100
 	}
-	path := "/memories?source=" + url.QueryEscape(source) + "&limit=" + strconv.Itoa(limit)
+	path := "/memories?source=" + url.QueryEscape(source) +
+		"&limit=" + strconv.Itoa(limit) +
+		"&offset=" + strconv.Itoa(offset)
 
 	resp, err := c.request(http.MethodGet, path, nil)
 	if err != nil {
@@ -228,17 +245,56 @@ func (c *MemoriesClient) DeleteMemory(id int) error {
 	return nil
 }
 
-// DeleteBySource lists memories matching the prefix and deletes each one.
-// Returns the number of memories deleted.
+// DeleteBySource bulk-deletes all memories matching the given source prefix
+// using the Memories delete-by-prefix endpoint. Returns the count deleted.
 func (c *MemoriesClient) DeleteBySource(prefix string) (int, error) {
-	memories, err := c.ListBySource(prefix, 0)
+	payload := struct {
+		SourcePrefix string `json:"source_prefix"`
+	}{SourcePrefix: prefix}
+
+	resp, err := c.request(http.MethodPost, "/memory/delete-by-prefix", payload)
 	if err != nil {
-		return 0, fmt.Errorf("list by source: %w", err)
+		return 0, err
 	}
-	for _, m := range memories {
-		if err := c.DeleteMemory(m.ID); err != nil {
-			return 0, fmt.Errorf("delete memory %d: %w", m.ID, err)
-		}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
-	return len(memories), nil
+
+	var result struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+	return result.Count, nil
+}
+
+// Count returns the number of memories matching a source prefix.
+func (c *MemoriesClient) Count(sourcePrefix string) (int, error) {
+	path := "/memories/count"
+	if sourcePrefix != "" {
+		path += "?source=" + url.QueryEscape(sourcePrefix)
+	}
+
+	resp, err := c.request(http.MethodGet, path, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+	return result.Count, nil
 }

@@ -36,9 +36,11 @@ vector storage and retrieval.
 
 The pipeline is orchestrated by `internal/pipeline/pipeline.go` in the `Run()`
 function. It accepts a `pipeline.Config` struct containing all dependencies
-(LLM client, Memories client, signal registry, worker count, progress callback)
-and returns a `pipeline.Result` with module counts, atom counts, analyses,
-synthesis, and any non-fatal errors collected during execution.
+(LLM client, Memories client, signal registry, worker count, progress callback,
+optional `context.Context` for cancellation) and returns a `pipeline.Result`
+with module counts, atom counts, analyses, synthesis, and any non-fatal errors
+collected during execution. If the context is cancelled, the pipeline returns
+`context.Canceled` at the next phase boundary.
 
 ### Phase 1: Scan
 
@@ -211,6 +213,29 @@ before the limit.
 After storing all layers, the manifest is updated with SHA-256 hashes, file
 sizes, and timestamps for every indexed file, then saved to
 `{projectRoot}/.carto/manifest.json`.
+
+### Phase 6: Skill Files
+
+```
+SystemSynthesis + ModuleAnalyses --> patterns.WriteFiles() --> CLAUDE.md + .cursorrules
+```
+
+If the pipeline produced a `SystemSynthesis` and `SkipSkillFiles` is not set,
+`patterns.WriteFiles()` generates `CLAUDE.md` and `.cursorrules` in the project
+root. These files contain architecture summaries, module descriptions, business
+domains, coding patterns, and write-back instructions.
+
+If the target files already exist, the Carto-generated section is wrapped in
+`<!-- BEGIN CARTO INDEX -->` / `<!-- END CARTO INDEX -->` markers and either
+replaces an existing Carto section or is appended, preserving user-authored
+content.
+
+### Cancellation
+
+The pipeline checks for context cancellation between every phase and inside
+the Phase 5 store loop. When cancelled (e.g., via the web UI stop button),
+it returns `context.Canceled` immediately. The server translates this into
+a "stopped" SSE event and tracks the run as stopped.
 
 ---
 
@@ -556,10 +581,16 @@ as a library. This:
 - Allows the Memories index to be shared across tools (CLI, IDE plugins, etc.)
 - Avoids embedding a large C++ dependency
 - Enables scaling the storage layer independently
-- Uses a simple REST interface: `/memory/add`, `/memory/add-batch`,
-  `/search`, `/memories`, `/memory/{id}` (DELETE)
+- Uses a REST interface: `/memory/add`, `/memory/add-batch`, `/search`,
+  `/memories`, `/memories/count`, `/memory/delete-by-prefix`, `/memory/{id}`
+  (DELETE)
+- Search supports `source_prefix` filtering for project-scoped queries
+- Bulk delete via `POST /memory/delete-by-prefix` with `{source_prefix}`
+- Count via `GET /memories/count?source=<prefix>`
+- List supports `offset` parameter for pagination (up to 5000 limit)
 
-Batch writes are chunked into groups of 500 for reliability.
+Batch writes are chunked into groups of 500 (server handles internal chunking
+by 100).
 
 ### Manifest-Based Incremental Indexing
 
@@ -663,6 +694,14 @@ This enables:
     |  store.StoreLayer("_system", "blueprint", ...)  |
     |  store.StoreLayer("_system", "patterns", ...)   |
     |  manifest.Save()                                |
+    +----+--------------------------------------------+
+         |
+         v
+    +----+--------------------------------------------+
+    |       Phase 6: Skill Files (optional)           |
+    |                                                 |
+    |  patterns.WriteFiles(root, input, "all")        |
+    |  --> CLAUDE.md + .cursorrules                   |
     +-------------------------------------------------+
               |
               v
@@ -695,6 +734,7 @@ cmd/carto/main.go
   |     +-- internal/signals
   |     +-- internal/storage
   |     +-- internal/manifest
+  |     +-- internal/patterns  (skill file generation in Phase 6)
   |     +-- internal/llm
   |
   +-- internal/patterns       (CLAUDE.md / .cursorrules generation)

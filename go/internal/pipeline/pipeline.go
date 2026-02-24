@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"context"
@@ -20,6 +21,7 @@ import (
 	"github.com/divyekant/carto/internal/history"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
+	"github.com/divyekant/carto/internal/patterns"
 	"github.com/divyekant/carto/internal/scanner"
 	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
@@ -33,6 +35,7 @@ type LLMClient interface {
 
 // Config holds all the dependencies the pipeline needs.
 type Config struct {
+	Ctx            context.Context // optional: cancel to stop the pipeline mid-run
 	ProjectName    string
 	RootPath       string
 	LLMClient      LLMClient
@@ -45,6 +48,7 @@ type Config struct {
 	ModuleFilter   string                               // optional: index only this module
 	FastMaxTokens  int                                  // optional: override fast-tier max tokens (default 4096)
 	DeepMaxTokens  int                                  // optional: override deep-tier max tokens (default 8192)
+	SkipSkillFiles bool                                 // if true, skip generating CLAUDE.md and .cursorrules
 }
 
 // Result holds the output of a full pipeline run.
@@ -64,6 +68,11 @@ type Result struct {
 //  4. Deep Analysis — per-module wiring/zones analysis and system synthesis
 //  5. Store — persist all layers to Memories and update manifest
 func Run(cfg Config) (*Result, error) {
+	ctx := cfg.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if cfg.MaxWorkers <= 0 {
 		cfg.MaxWorkers = 4
 	}
@@ -81,6 +90,16 @@ func Run(cfg Config) (*Result, error) {
 	logFn := cfg.LogFn
 	if logFn == nil {
 		logFn = func(string, string) {}
+	}
+
+	// cancelled is a helper to check for context cancellation.
+	cancelled := func() bool {
+		select {
+		case <-ctx.Done():
+			return true
+		default:
+			return false
+		}
 	}
 
 	// ── Phase 1: Scan ──────────────────────────────────────────────────
@@ -171,6 +190,10 @@ func Run(cfg Config) (*Result, error) {
 
 	result.FilesIndexed = totalFiles
 
+	if cancelled() {
+		return result, context.Canceled
+	}
+
 	// ── Phase 2: Chunk + Atoms (parallel per module) ───────────────────
 	logFn("info", fmt.Sprintf("Chunking and analyzing %d files across %d module(s)...", totalFiles, len(work)))
 
@@ -237,6 +260,10 @@ func Run(cfg Config) (*Result, error) {
 		result.AtomsCreated += len(ma.atoms)
 	}
 
+	if cancelled() {
+		return result, context.Canceled
+	}
+
 	// ── Phase 3: History + Signals (parallel per module) ───────────────
 	logFn("info", fmt.Sprintf("Extracted %d atoms. Fetching git history and signals...", result.AtomsCreated))
 
@@ -276,7 +303,7 @@ func Run(cfg Config) (*Result, error) {
 					RepoRoot:   scanResult.Root,
 				}
 				var srcErr error
-				arts, srcErr = cfg.SourceRegistry.FetchModule(context.Background(), req)
+				arts, srcErr = cfg.SourceRegistry.FetchModule(ctx, req)
 				if srcErr != nil {
 					contextMu.Lock()
 					contextErrors = append(contextErrors, srcErr)
@@ -307,7 +334,7 @@ func Run(cfg Config) (*Result, error) {
 			Project:  cfg.ProjectName,
 			RepoRoot: scanResult.Root,
 		}
-		pArts, pErr := cfg.SourceRegistry.FetchAllProject(context.Background(), req)
+		pArts, pErr := cfg.SourceRegistry.FetchAllProject(ctx, req)
 		if pErr != nil {
 			result.Errors = append(result.Errors, pErr)
 		}
@@ -315,6 +342,10 @@ func Run(cfg Config) (*Result, error) {
 		if len(projectArtifacts) > 0 {
 			logFn("info", fmt.Sprintf("Fetched %d project-scope artifact(s)", len(projectArtifacts)))
 		}
+	}
+
+	if cancelled() {
+		return result, context.Canceled
 	}
 
 	// ── Phase 4: Deep Analysis ─────────────────────────────────────────
@@ -353,6 +384,10 @@ func Run(cfg Config) (*Result, error) {
 		progress("synthesis", 1, 1)
 	}
 
+	if cancelled() {
+		return result, context.Canceled
+	}
+
 	// ── Phase 5: Store ─────────────────────────────────────────────────
 	logFn("info", "Storing results in Memories...")
 	store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
@@ -361,6 +396,10 @@ func Run(cfg Config) (*Result, error) {
 	storeTotal := len(work)*5 + 2
 
 	for i, w := range work {
+		if cancelled() {
+			return result, context.Canceled
+		}
+
 		modName := w.module.Name
 
 		// For non-incremental runs, clear existing module data before storing
@@ -371,9 +410,14 @@ func Run(cfg Config) (*Result, error) {
 			}
 		}
 
-		// Store atoms.
-		if atomsJSON, err := json.Marshal(moduleAtomsList[i].atoms); err == nil {
-			if err := store.StoreLayer(modName, "atoms", string(atomsJSON)); err != nil {
+		// Store atoms individually for better searchability and to avoid
+		// truncation when the total atoms JSON exceeds the 49K content limit.
+		atomEntries := make([]string, len(moduleAtomsList[i].atoms))
+		for j, a := range moduleAtomsList[i].atoms {
+			atomEntries[j] = formatAtomEntry(a)
+		}
+		if len(atomEntries) > 0 {
+			if err := store.StoreBatch(modName, "atoms", atomEntries); err != nil {
 				log.Printf("pipeline: warning: failed to store atoms for %s: %v", modName, err)
 				result.Errors = append(result.Errors, err)
 			}
@@ -492,6 +536,19 @@ func Run(cfg Config) (*Result, error) {
 		}
 	}
 
+	// ── Phase 6: Generate Skill Files ─────────────────────────────────
+	if !cfg.SkipSkillFiles && result.Synthesis != nil {
+		logFn("info", "Generating skill files (CLAUDE.md, .cursorrules)...")
+		progress("skillfiles", 0, 1)
+
+		input := buildPatternsInput(cfg.ProjectName, result.Synthesis, result.ModuleAnalyses)
+		if err := patterns.WriteFiles(cfg.RootPath, input, "all"); err != nil {
+			log.Printf("pipeline: warning: failed to write skill files: %v", err)
+			result.Errors = append(result.Errors, err)
+		}
+		progress("skillfiles", 1, 1)
+	}
+
 	return result, nil
 }
 
@@ -553,4 +610,46 @@ func countModuleFiles(modules []scanner.Module) int {
 		n += len(m.Files)
 	}
 	return n
+}
+
+// buildPatternsInput assembles a patterns.Input from pipeline results.
+func buildPatternsInput(projectName string, synthesis *analyzer.SystemSynthesis, analyses []analyzer.ModuleAnalysis) patterns.Input {
+	input := patterns.Input{
+		ProjectName: projectName,
+		Blueprint:   synthesis.Blueprint,
+		Patterns:    synthesis.Patterns,
+	}
+
+	for _, ma := range analyses {
+		input.Modules = append(input.Modules, patterns.ModuleSummary{
+			Name:   ma.ModuleName,
+			Intent: ma.ModuleIntent,
+		})
+		for _, z := range ma.Zones {
+			input.Zones = append(input.Zones, patterns.Zone{
+				Name:   z.Name,
+				Intent: z.Intent,
+				Files:  z.Files,
+			})
+		}
+	}
+
+	return input
+}
+
+// formatAtomEntry formats an atom as a searchable text entry for storage.
+func formatAtomEntry(a *atoms.Atom) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%s) in %s:%d-%d\n", a.Name, a.Kind, a.FilePath, a.StartLine, a.EndLine)
+	fmt.Fprintf(&b, "Summary: %s\n", a.Summary)
+	if len(a.Imports) > 0 {
+		fmt.Fprintf(&b, "Imports: %s\n", strings.Join(a.Imports, ", "))
+	}
+	if len(a.Exports) > 0 {
+		fmt.Fprintf(&b, "Exports: %s\n", strings.Join(a.Exports, ", "))
+	}
+	if a.ClarifiedCode != "" {
+		fmt.Fprintf(&b, "\n%s\n", a.ClarifiedCode)
+	}
+	return b.String()
 }

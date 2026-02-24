@@ -344,6 +344,115 @@ func TestGenerateCLAUDE_ZoneFilesListed(t *testing.T) {
 	}
 }
 
+func TestWriteFiles_PreservesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	input := sampleInput()
+
+	// Write existing CLAUDE.md with user content.
+	existingClaude := "# My Project\n\nThis is my project's existing CLAUDE.md with custom instructions.\n\n## My Custom Section\n\nDo not delete this.\n"
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(existingClaude), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write existing .cursorrules with user content.
+	existingCursor := "Custom cursor rules here.\nDo not overwrite.\n"
+	if err := os.WriteFile(filepath.Join(dir, ".cursorrules"), []byte(existingCursor), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteFiles(dir, input, "all"); err != nil {
+		t.Fatalf("WriteFiles failed: %v", err)
+	}
+
+	// CLAUDE.md should contain both the original content and the Carto section.
+	claudeData, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeStr := string(claudeData)
+	if !strings.Contains(claudeStr, "This is my project's existing CLAUDE.md") {
+		t.Error("CLAUDE.md should preserve existing user content")
+	}
+	if !strings.Contains(claudeStr, "My Custom Section") {
+		t.Error("CLAUDE.md should preserve custom sections")
+	}
+	if !strings.Contains(claudeStr, "microservices architecture") {
+		t.Error("CLAUDE.md should contain the Carto-generated blueprint")
+	}
+	if !strings.Contains(claudeStr, cartoBeginMarker) {
+		t.Error("CLAUDE.md should contain the Carto begin marker")
+	}
+	if !strings.Contains(claudeStr, cartoEndMarker) {
+		t.Error("CLAUDE.md should contain the Carto end marker")
+	}
+
+	// .cursorrules should contain both original and Carto content.
+	cursorData, err := os.ReadFile(filepath.Join(dir, ".cursorrules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursorStr := string(cursorData)
+	if !strings.Contains(cursorStr, "Custom cursor rules here") {
+		t.Error(".cursorrules should preserve existing content")
+	}
+	if !strings.Contains(cursorStr, "microservices architecture") {
+		t.Error(".cursorrules should contain Carto-generated content")
+	}
+}
+
+func TestWriteFiles_UpdatesExistingCartoSection(t *testing.T) {
+	dir := t.TempDir()
+
+	// First write with initial input.
+	input1 := Input{
+		ProjectName: "OldProject",
+		Blueprint:   "Old architecture.",
+	}
+	existingContent := "# My Project\n\nUser instructions.\n"
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(existingContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteFiles(dir, input1, "claude"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second write with updated input — should replace the Carto section.
+	input2 := Input{
+		ProjectName: "NewProject",
+		Blueprint:   "New architecture.",
+	}
+	if err := WriteFiles(dir, input2, "claude"); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeData, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeStr := string(claudeData)
+
+	// User content preserved.
+	if !strings.Contains(claudeStr, "User instructions.") {
+		t.Error("should preserve user content after update")
+	}
+	// Old Carto content replaced.
+	if strings.Contains(claudeStr, "Old architecture") {
+		t.Error("old Carto content should be replaced")
+	}
+	if strings.Contains(claudeStr, "OldProject") {
+		t.Error("old project name should be replaced")
+	}
+	// New Carto content present.
+	if !strings.Contains(claudeStr, "New architecture") {
+		t.Error("new Carto content should be present")
+	}
+	// Only one begin/end marker pair.
+	if strings.Count(claudeStr, cartoBeginMarker) != 1 {
+		t.Errorf("should have exactly 1 begin marker, got %d", strings.Count(claudeStr, cartoBeginMarker))
+	}
+}
+
 func TestWriteFiles_ContentRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	input := sampleInput()
@@ -352,23 +461,31 @@ func TestWriteFiles_ContentRoundTrip(t *testing.T) {
 		t.Fatalf("WriteFiles failed: %v", err)
 	}
 
-	// Read CLAUDE.md and verify it matches GenerateCLAUDE output.
+	// Read CLAUDE.md and verify it contains the generated content within markers.
 	claudeData, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("failed to read CLAUDE.md: %v", err)
 	}
-	expected := GenerateCLAUDE(input)
-	if string(claudeData) != expected {
-		t.Error("CLAUDE.md content should match GenerateCLAUDE output exactly")
+	claudeStr := string(claudeData)
+	generated := GenerateCLAUDE(input)
+	if !strings.Contains(claudeStr, generated) {
+		t.Error("CLAUDE.md should contain the GenerateCLAUDE output")
+	}
+	if !strings.Contains(claudeStr, cartoBeginMarker) {
+		t.Error("CLAUDE.md should contain begin marker")
+	}
+	if !strings.Contains(claudeStr, cartoEndMarker) {
+		t.Error("CLAUDE.md should contain end marker")
 	}
 
-	// Read .cursorrules and verify it matches GenerateCursorRules output.
+	// Read .cursorrules and verify it contains the generated content within markers.
 	cursorData, err := os.ReadFile(filepath.Join(dir, ".cursorrules"))
 	if err != nil {
 		t.Fatalf("failed to read .cursorrules: %v", err)
 	}
-	expectedCursor := GenerateCursorRules(input)
-	if string(cursorData) != expectedCursor {
-		t.Error(".cursorrules content should match GenerateCursorRules output exactly")
+	cursorStr := string(cursorData)
+	generatedCursor := GenerateCursorRules(input)
+	if !strings.Contains(cursorStr, generatedCursor) {
+		t.Error(".cursorrules should contain the GenerateCursorRules output")
 	}
 }

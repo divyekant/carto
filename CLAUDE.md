@@ -25,7 +25,7 @@ go test -short ./...
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture guide.
 
 **Key concepts:**
-- **5-phase pipeline:** Scan → Chunk+Atoms → History+Signals → Deep Analysis → Store
+- **6-phase pipeline:** Scan → Chunk+Atoms → History+Signals → Deep Analysis → Store → Skill Files
 - **Two-tier LLM strategy:** Fast tier (high-volume atom summaries) + Deep tier (expensive cross-component analysis)
 - **7-layer context graph:** Map → Atoms → History → Signals → Wiring → Zones → Blueprint
 - **Tiered retrieval:** mini (~5KB), standard (~50KB), full (~500KB)
@@ -44,7 +44,7 @@ All application code lives in `internal/`. CLI entry point is `cmd/carto/`.
 | `llm` | LLM client with multi-provider support (Anthropic, OpenAI, Ollama) |
 | `manifest` | Incremental indexing via SHA-256 file hashing |
 | `patterns` | Skill file generation (CLAUDE.md, .cursorrules) |
-| `pipeline` | 5-phase orchestrator |
+| `pipeline` | 6-phase orchestrator with cancellation support |
 | `scanner` | File discovery, .gitignore, module detection |
 | `signals` | Plugin-based external signal collection (layer 1c) |
 | `storage` | Memories REST client, layered storage, tiered retrieval |

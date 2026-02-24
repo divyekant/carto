@@ -157,9 +157,21 @@ func GenerateCursorRules(input Input) string {
 	return b.String()
 }
 
+// Section markers used to delimit the Carto-generated section within
+// existing files. This allows updating the Carto section without
+// destroying user-authored content.
+const (
+	cartoBeginMarker = "<!-- BEGIN CARTO INDEX -->"
+	cartoEndMarker   = "<!-- END CARTO INDEX -->"
+)
+
 // WriteFiles writes CLAUDE.md and/or .cursorrules to the given directory.
 // The format parameter controls which files are written: "claude" writes only
 // CLAUDE.md, "cursor" writes only .cursorrules, and "all" writes both.
+//
+// If the target file already exists, the Carto section is appended or
+// updated in-place (between BEGIN/END markers) without disturbing
+// user-authored content.
 func WriteFiles(dir string, input Input, format string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("patterns: cannot create directory %s: %w", dir, err)
@@ -180,22 +192,50 @@ func WriteFiles(dir string, input Input, format string) error {
 	}
 }
 
-// writeCLAUDE writes a CLAUDE.md file to the given directory.
+// writeCLAUDE writes (or updates) a CLAUDE.md file in the given directory.
 func writeCLAUDE(dir string, input Input) error {
 	path := filepath.Join(dir, "CLAUDE.md")
-	content := GenerateCLAUDE(input)
+	cartoSection := cartoBeginMarker + "\n" + GenerateCLAUDE(input) + cartoEndMarker + "\n"
+	content := mergeWithExisting(path, cartoSection)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("patterns: failed to write %s: %w", path, err)
 	}
 	return nil
 }
 
-// writeCursorRules writes a .cursorrules file to the given directory.
+// writeCursorRules writes (or updates) a .cursorrules file in the given directory.
 func writeCursorRules(dir string, input Input) error {
 	path := filepath.Join(dir, ".cursorrules")
-	content := GenerateCursorRules(input)
+	cartoSection := cartoBeginMarker + "\n" + GenerateCursorRules(input) + cartoEndMarker + "\n"
+	content := mergeWithExisting(path, cartoSection)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("patterns: failed to write %s: %w", path, err)
 	}
 	return nil
+}
+
+// mergeWithExisting reads the file at path (if it exists) and either replaces
+// an existing Carto section or appends the new section. If the file doesn't
+// exist, returns just the new section.
+func mergeWithExisting(path, cartoSection string) string {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		// File doesn't exist — return just the Carto section.
+		return cartoSection
+	}
+
+	old := string(existing)
+	beginIdx := strings.Index(old, cartoBeginMarker)
+	endIdx := strings.Index(old, cartoEndMarker)
+
+	if beginIdx >= 0 && endIdx >= 0 && endIdx > beginIdx {
+		// Replace existing Carto section.
+		return old[:beginIdx] + cartoSection + old[endIdx+len(cartoEndMarker)+1:]
+	}
+
+	// Append Carto section to existing content.
+	if !strings.HasSuffix(old, "\n") {
+		old += "\n"
+	}
+	return old + "\n" + cartoSection
 }

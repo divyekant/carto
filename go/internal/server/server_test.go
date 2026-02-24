@@ -189,6 +189,79 @@ func TestQueryEndpoint(t *testing.T) {
 	}
 }
 
+func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
+	// Simulates the real-world issue: search returns results from non-matching
+	// sources (e.g. "claude-code/..."), so the project source prefix filter
+	// drops everything. The handler should fall back to ListBySource.
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.URL.Path == "/search" && r.Method == http.MethodPost {
+			// Search returns results from non-matching sources.
+			json.NewEncoder(w).Encode(map[string]any{
+				"results": []map[string]any{
+					{"id": 100, "text": "Auth handling", "score": 0.9, "source": "claude-code/myproj"},
+					{"id": 101, "text": "Login flow", "score": 0.8, "source": "learning/myproj"},
+				},
+			})
+			return
+		}
+
+		if r.URL.Path == "/memories" && r.Method == http.MethodGet {
+			// ListBySource returns project memories for the carto source prefix.
+			json.NewEncoder(w).Encode(map[string]any{
+				"memories": []map[string]any{
+					{"id": 50, "text": "Authentication module handles JWT and session tokens", "source": "carto/myproj/auth/layer:atoms"},
+					{"id": 51, "text": "Blueprint: auth + api + storage", "source": "carto/myproj/_system/layer:blueprint"},
+					{"id": 52, "text": "Zones: auth, api, db", "source": "carto/myproj/auth/layer:zones"},
+				},
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer memSrv.Close()
+
+	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"text": "authentication", "project": "myproj", "k": 5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	results, ok := resp["results"].([]any)
+	if !ok {
+		t.Fatalf("expected results array, got %T", resp["results"])
+	}
+
+	// Should have 3 results from the fallback ListBySource.
+	if len(results) != 3 {
+		t.Errorf("expected 3 results from ListBySource fallback, got %d", len(results))
+	}
+
+	// Verify results have correct source prefix.
+	for _, r := range results {
+		item := r.(map[string]any)
+		src := item["source"].(string)
+		if !strings.HasPrefix(src, "carto/myproj/") {
+			t.Errorf("expected source with carto/myproj/ prefix, got %q", src)
+		}
+	}
+}
+
 func TestQueryEndpoint_MissingText(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
 	srv := New(config.Config{}, memoriesClient, "", nil)

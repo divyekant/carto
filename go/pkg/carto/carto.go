@@ -105,7 +105,7 @@ func Query(text string, opts QueryOptions) ([]QueryResult, error) {
 
 	searchOpts := storage.SearchOptions{K: opts.K, Hybrid: true}
 	if opts.Project != "" {
-		searchOpts.Source = fmt.Sprintf("carto/%s/", opts.Project)
+		searchOpts.SourcePrefix = fmt.Sprintf("carto/%s/", opts.Project)
 		searchOpts.K = opts.K * 3
 	}
 

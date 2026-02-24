@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -131,7 +132,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Project != "" {
 		sourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
-		opts.Source = sourcePrefix
+		opts.SourcePrefix = sourcePrefix
 		// Request extra results so we have enough after filtering.
 		opts.K = req.K * 3
 	}
@@ -156,6 +157,26 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+
+	// Fallback: if search returned no project-matching results, use ListBySource
+	// to retrieve all memories for the project. This works around search APIs
+	// that don't support source-prefix filtering.
+	if len(items) == 0 && sourcePrefix != "" {
+		listed, listErr := s.memoriesClient.ListBySource(sourcePrefix, req.K*5, 0)
+		if listErr == nil {
+			for _, sr := range listed {
+				items = append(items, queryResultItem{
+					Text:   sr.Text,
+					Source: sr.Source,
+					Score:  sr.Score,
+				})
+				if len(items) >= req.K {
+					break
+				}
+			}
+		}
+	}
+
 	if items == nil {
 		items = []queryResultItem{}
 	}
@@ -439,6 +460,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	result, err := pipeline.Run(pipeline.Config{
+		Ctx:               run.Ctx,
 		ProjectName:       projectName,
 		RootPath:          absPath,
 		LLMClient:         llmClient,
@@ -457,6 +479,10 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		DeepMaxTokens: cfg.DeepMaxTokens,
 	})
 	if err != nil {
+		if err == context.Canceled {
+			run.SendStopped()
+			return
+		}
 		run.SendError(err.Error())
 		return
 	}
@@ -507,6 +533,25 @@ func (s *Server) runIndexFromURL(run *IndexRun, projectName string, req indexReq
 	}
 	// runIndex handles Finish internally via defer.
 	s.runIndex(run, projectName, cloneResult.Dir, localReq, cfg)
+}
+
+// handleStopIndex cancels an active indexing run.
+func (s *Server) handleStopIndex(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "project name is required")
+		return
+	}
+
+	if !s.runs.Stop(name) {
+		writeError(w, http.StatusNotFound, "no active index run for project "+name)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"project": name,
+		"status":  "stopping",
+	})
 }
 
 // handleProgress streams SSE events for an active indexing run.

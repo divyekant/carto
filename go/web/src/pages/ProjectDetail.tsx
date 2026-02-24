@@ -16,7 +16,7 @@ interface Project {
   file_count: number
 }
 
-type IndexState = 'idle' | 'starting' | 'running' | 'complete' | 'error'
+type IndexState = 'idle' | 'starting' | 'running' | 'complete' | 'error' | 'stopped'
 
 interface ProgressData {
   phase: string
@@ -48,6 +48,7 @@ export default function ProjectDetail() {
   const [indexState, setIndexState] = useState<IndexState>('idle')
   const [incremental, setIncremental] = useState(false)
   const [moduleFilter, setModuleFilter] = useState('')
+  const [stopping, setStopping] = useState(false)
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
   const [result, setResult] = useState<CompleteData | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -99,6 +100,8 @@ export default function ProjectDetail() {
         } else if (myRun.status === 'error' && myRun.error) {
           setErrorMsg(myRun.error)
           setPageState('error')
+        } else if (myRun.status === 'stopped') {
+          setPageState('stopped')
         }
       })
       .catch(() => {})
@@ -143,6 +146,14 @@ export default function ProjectDetail() {
       es.close()
     })
 
+    es.addEventListener('stopped', () => {
+      setLogs(prev => [...prev, { level: 'warn', message: 'Indexing stopped by user', timestamp: Date.now() }])
+      setPageState('stopped')
+      setStopping(false)
+      toast('Indexing stopped')
+      es.close()
+    })
+
     es.onerror = () => {
       if (stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
@@ -150,6 +161,17 @@ export default function ProjectDetail() {
         setPageState('error')
       }
       es.close()
+    }
+  }
+
+  async function stopIndex() {
+    if (!name) return
+    setStopping(true)
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(name)}/stop`, { method: 'POST' })
+    } catch {
+      setStopping(false)
+      toast.error('Failed to stop indexing')
     }
   }
 
@@ -198,6 +220,7 @@ export default function ProjectDetail() {
     setResult(null)
     setErrorMsg('')
     setLogs([])
+    setStopping(false)
   }
 
   if (loading) {
@@ -266,7 +289,25 @@ export default function ProjectDetail() {
           )}
 
           {indexState === 'running' && (
-            <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+            <div className="space-y-2">
+              <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={stopIndex}
+                disabled={stopping}
+              >
+                {stopping ? 'Stopping...' : 'Stop'}
+              </Button>
+            </div>
+          )}
+
+          {indexState === 'stopped' && (
+            <div className="space-y-2">
+              <Badge variant="secondary" className="text-xs">Stopped</Badge>
+              <p className="text-xs text-muted-foreground">Indexing was stopped by user</p>
+              <Button variant="secondary" size="sm" onClick={resetIndex}>Index Again</Button>
+            </div>
           )}
 
           {indexState === 'complete' && result && (

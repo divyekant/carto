@@ -53,8 +53,9 @@ type MemoriesAPI interface {
 	AddMemory(m Memory) (int, error)
 	AddBatch(memories []Memory) error
 	Search(query string, opts SearchOptions) ([]SearchResult, error)
-	ListBySource(source string, limit int) ([]SearchResult, error)
+	ListBySource(source string, limit, offset int) ([]SearchResult, error)
 	DeleteBySource(prefix string) (int, error)
+	Count(sourcePrefix string) (int, error)
 }
 
 // Store provides domain-specific Memories storage for carto layers.
@@ -127,18 +128,15 @@ func (s *Store) RetrieveByTier(module string, tier Tier) (map[string][]SearchRes
 
 // RetrieveLayer retrieves all entries for a specific layer using ListBySource.
 func (s *Store) RetrieveLayer(module, layer string) ([]SearchResult, error) {
-	return s.memories.ListBySource(s.sourceTag(module, layer), 0)
+	return s.memories.ListBySource(s.sourceTag(module, layer), 0, 0)
 }
 
-// ClearModule deletes all entries for a module across all layers.
+// ClearModule deletes all entries for a module across all layers
+// using a single bulk delete with the module prefix.
 func (s *Store) ClearModule(module string) error {
-	for _, layer := range allLayers {
-		tag := s.sourceTag(module, layer)
-		if _, err := s.memories.DeleteBySource(tag); err != nil {
-			return fmt.Errorf("clear layer %s: %w", layer, err)
-		}
-	}
-	return nil
+	prefix := fmt.Sprintf("carto/%s/%s/", s.project, module)
+	_, err := s.memories.DeleteBySource(prefix)
+	return err
 }
 
 // ClearProject deletes all entries for the entire project.

@@ -100,8 +100,12 @@ func (m *mockMemories) Search(query string, opts storage.SearchOptions) ([]stora
 	return nil, nil
 }
 
-func (m *mockMemories) ListBySource(source string, limit int) ([]storage.SearchResult, error) {
+func (m *mockMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
 	return nil, nil
+}
+
+func (m *mockMemories) Count(sourcePrefix string) (int, error) {
+	return 0, nil
 }
 
 func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
@@ -342,14 +346,16 @@ func TestRun_IncrementalManifest(t *testing.T) {
 	llmClient := &mockLLM{}
 	mem := &mockMemories{healthy: true}
 
-	// First run: full index.
+	// First run: full index. Skip skill files so generated CLAUDE.md/.cursorrules
+	// don't appear as new files in the second incremental run.
 	result1, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  2,
-		Incremental: true,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
 	})
 	if err != nil {
 		t.Fatalf("first run returned fatal error: %v", err)
@@ -372,12 +378,13 @@ func TestRun_IncrementalManifest(t *testing.T) {
 	// Second run: incremental, no changes. Should process 0 files because
 	// all files are already in the manifest with matching hashes.
 	result2, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  2,
-		Incremental: true,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
 	})
 	if err != nil {
 		t.Fatalf("second run returned fatal error: %v", err)
@@ -428,8 +435,8 @@ func TestRun_ProgressPhases(t *testing.T) {
 	phaseMu.Lock()
 	defer phaseMu.Unlock()
 
-	// The phases should appear in order: scan, atoms, history, analysis, synthesis, store.
-	expected := []string{"scan", "atoms", "history", "analysis", "synthesis", "store"}
+	// The phases should appear in order: scan, atoms, history, analysis, synthesis, store, skillfiles.
+	expected := []string{"scan", "atoms", "history", "analysis", "synthesis", "store", "skillfiles"}
 	if len(phaseOrder) != len(expected) {
 		t.Errorf("phase order: got %v, want %v", phaseOrder, expected)
 	} else {
@@ -593,6 +600,132 @@ func TestRun_NonIncrementalClearsOldData(t *testing.T) {
 	}
 }
 
+func TestRun_AtomsStoredIndividually(t *testing.T) {
+	// Verify atoms are stored as individual entries (one per atom) rather than
+	// one giant JSON blob. This ensures atoms are individually searchable in
+	// Memories and avoids truncation for large codebases.
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.AtomsCreated < 2 {
+		t.Fatalf("expected >= 2 atoms, got %d", result.AtomsCreated)
+	}
+
+	// Count memories stored with atoms layer tag.
+	memories := mem.getMemories()
+	atomMemories := 0
+	for _, m := range memories {
+		if strings.Contains(m.source, "layer:atoms") {
+			atomMemories++
+		}
+	}
+
+	// Should have multiple atom memories (one per atom), not just 1 blob.
+	if atomMemories < 2 {
+		t.Errorf("expected >= 2 individual atom memories, got %d (atoms are being stored as one blob)", atomMemories)
+	}
+
+	// Each atom memory should be a manageable size, not a multi-MB JSON array.
+	for _, m := range memories {
+		if strings.Contains(m.source, "layer:atoms") && len(m.text) > 10000 {
+			t.Errorf("atom memory is too large (%d bytes); should be individual atom, not JSON blob", len(m.text))
+		}
+	}
+}
+
+func TestRun_GeneratesSkillFiles(t *testing.T) {
+	// Verify the pipeline generates CLAUDE.md and .cursorrules after indexing.
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+
+	// Synthesis must be present for skill files.
+	if result.Synthesis == nil {
+		t.Fatal("Synthesis is nil — cannot verify skill file generation")
+	}
+
+	// CLAUDE.md should exist.
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	claudeContent, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("CLAUDE.md not generated: %v", err)
+	}
+	claudeStr := string(claudeContent)
+
+	// Should contain the project name.
+	if !strings.Contains(claudeStr, "test-project") {
+		t.Error("CLAUDE.md missing project name")
+	}
+	// Should contain the blueprint from synthesis.
+	if !strings.Contains(claudeStr, "A test system with one module") {
+		t.Error("CLAUDE.md missing blueprint content")
+	}
+	// Should contain patterns from synthesis.
+	if !strings.Contains(claudeStr, "dependency injection") {
+		t.Error("CLAUDE.md missing patterns")
+	}
+
+	// .cursorrules should exist.
+	cursorPath := filepath.Join(dir, ".cursorrules")
+	cursorContent, err := os.ReadFile(cursorPath)
+	if err != nil {
+		t.Fatalf(".cursorrules not generated: %v", err)
+	}
+	cursorStr := string(cursorContent)
+
+	if !strings.Contains(cursorStr, "test-project") {
+		t.Error(".cursorrules missing project name")
+	}
+}
+
+func TestRun_SkipSkillFilesWhenDisabled(t *testing.T) {
+	// Verify that setting SkipSkillFiles=true prevents file generation.
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	if _, err := os.Stat(claudePath); err == nil {
+		t.Error("CLAUDE.md should not be generated when SkipSkillFiles=true")
+	}
+
+	cursorPath := filepath.Join(dir, ".cursorrules")
+	if _, err := os.Stat(cursorPath); err == nil {
+		t.Error(".cursorrules should not be generated when SkipSkillFiles=true")
+	}
+}
+
 func TestRun_MemoriesUnhealthy(t *testing.T) {
 	dir := createTempProject(t)
 	mem := &mockMemories{healthy: false}
@@ -608,5 +741,32 @@ func TestRun_MemoriesUnhealthy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unreachable") {
 		t.Errorf("expected 'unreachable' in error, got: %v", err)
+	}
+}
+
+func TestRun_CancelledContext(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	// Cancel the context before running.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Run(Config{
+		Ctx:            ctx,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+
+	// No memories should have been stored.
+	if len(mem.getMemories()) != 0 {
+		t.Errorf("expected 0 stored memories, got %d", len(mem.getMemories()))
 	}
 }
