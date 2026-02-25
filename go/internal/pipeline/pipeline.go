@@ -213,14 +213,36 @@ func Run(cfg Config) (*Result, error) {
 	var wg sync.WaitGroup
 
 	for i, w := range work {
+		if cancelled() {
+			break
+		}
 		wg.Add(1)
-		sem <- struct{}{}
+
+		// Acquire semaphore with context awareness.
+		acquired := false
+		select {
+		case sem <- struct{}{}:
+			acquired = true
+		case <-ctx.Done():
+		}
+		if !acquired {
+			wg.Done()
+			break
+		}
 
 		go func(idx int, mw moduleWork) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
+			if cancelled() {
+				return
+			}
+
 			allChunks, chunkErrs := chunkModuleFiles(mw.module, mw.filesToIndex, scanResult.Root)
+
+			if cancelled() {
+				return
+			}
 
 			// Convert chunker.Chunk to atoms.Chunk.
 			atomChunks := make([]atoms.Chunk, len(allChunks))
@@ -237,7 +259,7 @@ func Run(cfg Config) (*Result, error) {
 			}
 
 			// Analyze atoms.
-			analyzed, analyzeErr := atomAnalyzer.AnalyzeBatch(atomChunks, cfg.MaxWorkers, nil)
+			analyzed, analyzeErr := atomAnalyzer.AnalyzeBatchCtx(ctx, atomChunks, cfg.MaxWorkers, nil)
 
 			atomsMu.Lock()
 			moduleAtomsList[idx] = moduleAtoms{module: mw.module, atoms: analyzed}
@@ -278,12 +300,30 @@ func Run(cfg Config) (*Result, error) {
 	contextDone := 0
 
 	for i, w := range work {
+		if cancelled() {
+			break
+		}
 		wg.Add(1)
-		sem <- struct{}{}
+
+		// Acquire semaphore with context awareness.
+		acquired := false
+		select {
+		case sem <- struct{}{}:
+			acquired = true
+		case <-ctx.Done():
+		}
+		if !acquired {
+			wg.Done()
+			break
+		}
 
 		go func(idx int, mw moduleWork) {
 			defer wg.Done()
 			defer func() { <-sem }()
+
+			if cancelled() {
+				return
+			}
 
 			// Extract git history.
 			histories, histErr := history.ExtractBulkHistory(
@@ -292,6 +332,10 @@ func Run(cfg Config) (*Result, error) {
 				&history.ExtractOptions{MaxCommits: 50, Since: "6 months ago"},
 				cfg.MaxWorkers,
 			)
+
+			if cancelled() {
+				return
+			}
 
 			// Fetch module-scoped source artifacts (e.g., git commits).
 			var arts []sources.Artifact
@@ -364,7 +408,7 @@ func Run(cfg Config) (*Result, error) {
 		}
 	}
 
-	moduleAnalyses, deepErr := deepAnalyzer.AnalyzeModules(inputs, cfg.MaxWorkers, func(done, total int) {
+	moduleAnalyses, deepErr := deepAnalyzer.AnalyzeModulesCtx(ctx, inputs, cfg.MaxWorkers, func(done, total int) {
 		progress("analysis", done, total)
 	})
 	if deepErr != nil {

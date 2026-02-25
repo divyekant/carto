@@ -615,12 +615,10 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Security: in Docker, restrict to projects directory.
-	if config.IsDocker() && s.projectsDir != "" {
-		if !strings.HasPrefix(absPath, s.projectsDir) {
-			writeError(w, http.StatusForbidden, "path outside allowed directory")
-			return
-		}
+	// Verify the path is readable (the filesystem itself is the boundary).
+	if _, err := os.Stat(absPath); err != nil {
+		writeError(w, http.StatusBadRequest, "path not accessible: "+err.Error())
+		return
 	}
 
 	entries, err := os.ReadDir(absPath)

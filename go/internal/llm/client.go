@@ -76,7 +76,11 @@ func NewClient(opts Options) *Client {
 	}
 
 	sem := make(chan struct{}, opts.MaxConcurrent)
-	c := &Client{opts: opts, sem: sem}
+	c := &Client{
+		opts: opts,
+		sem:  sem,
+		http: http.Client{Timeout: 5 * time.Minute},
+	}
 
 	if opts.IsOAuth {
 		c.oauth = &oauthState{

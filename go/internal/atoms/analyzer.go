@@ -1,6 +1,7 @@
 package atoms
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -120,6 +121,11 @@ func (a *Analyzer) AnalyzeChunk(chunk Chunk) (*Atom, error) {
 // completes with (done, total) counts. Chunks that fail analysis are skipped
 // with a logged warning. Results are returned in the same order as input.
 func (a *Analyzer) AnalyzeBatch(chunks []Chunk, maxWorkers int, progress func(done, total int)) ([]*Atom, error) {
+	return a.AnalyzeBatchCtx(context.Background(), chunks, maxWorkers, progress)
+}
+
+// AnalyzeBatchCtx is like AnalyzeBatch but accepts a context for cancellation.
+func (a *Analyzer) AnalyzeBatchCtx(ctx context.Context, chunks []Chunk, maxWorkers int, progress func(done, total int)) ([]*Atom, error) {
 	if maxWorkers <= 0 {
 		maxWorkers = 1
 	}
@@ -133,12 +139,35 @@ func (a *Analyzer) AnalyzeBatch(chunks []Chunk, maxWorkers int, progress func(do
 	var wg sync.WaitGroup
 
 	for i, chunk := range chunks {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+		if ctx.Err() != nil {
+			break
+		}
+
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore slot
+
+		acquired := false
+		select {
+		case sem <- struct{}{}:
+			acquired = true
+		case <-ctx.Done():
+		}
+		if !acquired {
+			wg.Done()
+			break
+		}
 
 		go func(idx int, ch Chunk) {
 			defer wg.Done()
-			defer func() { <-sem }() // release semaphore slot
+			defer func() { <-sem }()
+
+			if ctx.Err() != nil {
+				return
+			}
 
 			atom, err := a.AnalyzeChunk(ch)
 

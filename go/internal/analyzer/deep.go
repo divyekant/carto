@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -232,6 +233,11 @@ func (d *DeepAnalyzer) SynthesizeSystem(modules []ModuleAnalysis) (*SystemSynthe
 // with a logged warning; successfully analyzed modules are returned along with
 // any accumulated errors.
 func (d *DeepAnalyzer) AnalyzeModules(modules []ModuleInput, maxWorkers int, progress func(done, total int)) ([]ModuleAnalysis, error) {
+	return d.AnalyzeModulesCtx(context.Background(), modules, maxWorkers, progress)
+}
+
+// AnalyzeModulesCtx is like AnalyzeModules but accepts a context for cancellation.
+func (d *DeepAnalyzer) AnalyzeModulesCtx(ctx context.Context, modules []ModuleInput, maxWorkers int, progress func(done, total int)) ([]ModuleAnalysis, error) {
 	if maxWorkers <= 0 {
 		maxWorkers = 1
 	}
@@ -246,12 +252,30 @@ func (d *DeepAnalyzer) AnalyzeModules(modules []ModuleInput, maxWorkers int, pro
 	var wg sync.WaitGroup
 
 	for i, mod := range modules {
+		if ctx.Err() != nil {
+			break
+		}
+
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore slot
+
+		acquired := false
+		select {
+		case sem <- struct{}{}:
+			acquired = true
+		case <-ctx.Done():
+		}
+		if !acquired {
+			wg.Done()
+			break
+		}
 
 		go func(idx int, m ModuleInput) {
 			defer wg.Done()
-			defer func() { <-sem }() // release semaphore slot
+			defer func() { <-sem }()
+
+			if ctx.Err() != nil {
+				return
+			}
 
 			analysis, err := d.AnalyzeModule(m)
 
