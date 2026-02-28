@@ -44,7 +44,7 @@ go build -o carto ./cmd/carto
 
 # Verify
 ./carto --version
-# carto v0.3.0
+# carto v1.0.0
 ```
 
 Note: Requires CGO (tree-sitter). On Alpine: `apk add gcc musl-dev`. On Ubuntu: `apt install gcc`.

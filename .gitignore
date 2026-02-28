@@ -7,3 +7,5 @@ go/test-data/
 go/.carto/
 .ui-val/
 PLAN.md
+.env
+.apollo.yaml
