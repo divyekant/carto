@@ -195,28 +195,38 @@ The web UI provides:
 
 ---
 
-## Keeping the Index Current (Agent Write-Back)
+## Working with the Carto Index (Agent Read + Write-Back)
 
-After indexing, any AI agent can write discoveries back to Memories to keep the index fresh without re-running `carto index`.
+After indexing, AI agents should **query before editing** and **write back after changes** to keep the index current without re-running `carto index`.
 
-**Source tag convention:** `carto/{project}/{module}/layer:atoms`
+**Source tag convention:** `carto/{project}/{module}/layer:{layer}`
 
-**Write a discovery:**
+**Query before editing** (search for the function/file you are changing):
+```bash
+curl -s -X POST "$MEMORIES_URL/search" \
+  -H "Content-Type: application/json" -H "X-API-Key: $MEMORIES_API_KEY" \
+  -d '{"query": "functionName OR fileName", "k": 5, "hybrid": true, "source_prefix": "carto/my-project/"}'
+```
+
+**Write back after changes** (use atom format):
 ```bash
 curl -s -X POST "$MEMORIES_URL/memory/add" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $MEMORIES_API_KEY" \
   -d '{
-    "text": "The auth module now uses JWT tokens instead of session cookies. Updated in PR #42.",
+    "text": "handleAuth (function) in src/auth/handler.go:15-42\nSummary: Validates JWT tokens and extracts user claims.\nImports: jwt, context\nExports: handleAuth",
     "source": "carto/my-project/auth-service/layer:atoms"
   }'
 ```
+
+**Atom format:** `name (kind) in path:startLine-endLine` followed by Summary, Imports, Exports fields.
 
 **When to write back:**
 - After implementing a new feature or pattern
 - After fixing a bug (document the root cause)
 - After refactoring (document what changed and why)
 - After discovering an undocumented convention
+- After deleting code (note what was removed and why)
 
 See [agent-writeback.md](agent-writeback.md) for integration guides for Claude Code, Codex, OpenClaw, and Cursor.
 
