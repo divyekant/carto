@@ -37,6 +37,19 @@ carto index .
 - An LLM API key ([Anthropic](https://console.anthropic.com/), OpenAI-compatible, or Ollama)
 - A running [Memories](https://github.com/divyekant/memories) server (default: `http://localhost:8900`)
 
+### As a Claude Code plugin
+
+```bash
+# From the DK marketplace
+claude plugins marketplace add divyekant/dk-marketplace
+claude plugins install carto
+
+# Or install directly from GitHub
+claude plugins install github:divyekant/carto
+```
+
+**Note:** The plugin registers Carto's skill context. You still need to build the binary separately (see below).
+
 ### Build
 
 ```bash
