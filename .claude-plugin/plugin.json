@@ -1,0 +1,10 @@
+{
+  "name": "carto",
+  "description": "Intent-aware codebase intelligence. Scans codebases, builds layered semantic index using LLMs, stores in Memories MCP. Produces skill files for instant AI agent context.",
+  "version": "1.0.0",
+  "author": { "name": "Divyekant" },
+  "homepage": "https://github.com/divyekant/carto",
+  "repository": "https://github.com/divyekant/carto",
+  "license": "MIT",
+  "keywords": ["codebase-intelligence", "indexing", "semantic-search", "code-analysis"]
+}
