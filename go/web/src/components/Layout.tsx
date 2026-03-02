@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useTheme } from './ThemeProvider'
@@ -40,8 +40,79 @@ function ThemeToggle() {
   )
 }
 
+function SidebarContent({ health, onNavClick }: { health: { memories_healthy: boolean } | null; onNavClick?: () => void }) {
+  return (
+    <>
+      {/* Logo */}
+      <div className="px-4 py-3 border-b border-border h-12 flex items-center">
+        <span className="text-lg font-bold text-primary">C</span>
+        <span className="text-lg font-bold">arto</span>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 p-2 space-y-0.5">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === '/'}
+            onClick={onNavClick}
+            aria-label={item.label}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 px-3 py-2 rounded-md text-base transition-colors',
+                isActive
+                  ? 'bg-primary/10 text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )
+            }
+          >
+            <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Server status */}
+      <div className="px-4 py-3 border-t border-border/50">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Server</p>
+        <div className="flex items-center gap-2 text-sm">
+          <span
+            className={cn(
+              'inline-block w-2 h-2 rounded-full shrink-0',
+              health === null
+                ? 'bg-muted-foreground'
+                : health.memories_healthy
+                  ? 'bg-green-500'
+                  : 'bg-red-500'
+            )}
+          />
+          <span>
+            {health === null
+              ? 'Memories: ...'
+              : health.memories_healthy
+                ? 'Memories: OK'
+                : 'Memories: Down'}
+          </span>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
+        <span className="text-xs text-muted-foreground">v1.0.0</span>
+        <ThemeToggle />
+      </div>
+    </>
+  )
+}
+
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [health, setHealth] = useState<{ memories_healthy: boolean } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => {})
+  }, [])
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -72,50 +143,20 @@ export function Layout() {
         />
       )}
 
-      {/* Sidebar — icon-only, expand on hover */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-50 border-r border-border bg-sidebar flex flex-col transition-all duration-200 overflow-hidden',
-          'w-12 hover:w-48 group/sidebar',
-          'hidden md:flex',
-          mobileOpen && 'flex w-48'
-        )}
-      >
-        <div className="p-2 border-b border-border h-12 flex items-center">
-          <span className="text-lg font-bold text-primary shrink-0">C</span>
-          <span className="ml-1 text-sm font-bold text-primary opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap">arto</span>
-        </div>
-        <nav className="flex-1 p-1 space-y-0.5">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              onClick={() => setMobileOpen(false)}
-              aria-label={item.label}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-colors',
-                  isActive
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                )
-              }
-            >
-              <span className="text-base shrink-0" aria-hidden="true">{item.icon}</span>
-              <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity whitespace-nowrap text-xs">
-                {item.label}
-              </span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="p-1 border-t border-border">
-          <ThemeToggle />
-        </div>
+      {/* Mobile sidebar */}
+      {mobileOpen && (
+        <aside className="fixed inset-y-0 left-0 z-50 w-56 border-r border-border bg-sidebar flex flex-col md:hidden">
+          <SidebarContent health={health} onNavClick={() => setMobileOpen(false)} />
+        </aside>
+      )}
+
+      {/* Desktop sidebar — always expanded */}
+      <aside className="fixed inset-y-0 left-0 z-50 w-56 border-r border-border bg-sidebar flex-col hidden md:flex">
+        <SidebarContent health={health} />
       </aside>
 
-      {/* Main content — leave room for icon sidebar */}
-      <main className="flex-1 overflow-y-auto p-4 pt-16 md:p-8 md:pt-8 md:ml-12">
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto p-4 pt-16 md:p-8 md:pt-8 md:ml-56">
         <Outlet />
       </main>
     </div>
