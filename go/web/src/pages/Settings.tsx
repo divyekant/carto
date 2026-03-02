@@ -11,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Section } from '@/components/Section'
+import { cn } from '@/lib/utils'
 
 // Matches the Go configResponse JSON shape exactly
 interface Config {
@@ -23,6 +25,8 @@ interface Config {
   memories_url: string
   memories_key: string
   max_concurrent: number
+  fast_max_tokens: number
+  deep_max_tokens: number
   github_token: string
   jira_token: string
   jira_email: string
@@ -184,7 +188,7 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
 
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
+      <Label className="text-sm font-medium">{label}</Label>
       <Select
         value={showCustomInput ? CUSTOM_MODEL_VALUE : value}
         onValueChange={handleSelectChange}
@@ -216,8 +220,8 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
           autoFocus
         />
       )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
-      <p className="text-xs text-muted-foreground">{description}</p>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <p className="text-sm text-muted-foreground">{description}</p>
     </div>
   )
 }
@@ -233,6 +237,8 @@ export default function Settings() {
     memories_url: '',
     memories_key: '',
     max_concurrent: 10,
+    fast_max_tokens: 4096,
+    deep_max_tokens: 8192,
     github_token: '',
     jira_token: '',
     jira_email: '',
@@ -302,6 +308,9 @@ export default function Settings() {
         fast_model: config.fast_model,
         deep_model: config.deep_model,
         memories_url: config.memories_url,
+        max_concurrent: config.max_concurrent,
+        fast_max_tokens: config.fast_max_tokens,
+        deep_max_tokens: config.deep_max_tokens,
       }
 
       if (config.anthropic_key && !config.anthropic_key.includes('****')) patch.anthropic_key = config.anthropic_key
@@ -368,7 +377,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div>
-        <h2 className="text-lg font-semibold mb-3">Settings</h2>
+        <h2 className="text-2xl font-bold mb-3">Settings</h2>
         <p className="text-muted-foreground text-sm">Loading...</p>
       </div>
     )
@@ -380,23 +389,27 @@ export default function Settings() {
   const showLlmApiKey = provider !== 'anthropic'
 
   return (
-    <div>
-      <h2 className="text-lg font-semibold mb-3">Settings</h2>
+    <div className="space-y-6">
+      {/* Header with save */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Settings</h2>
+        <Button onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Settings'}
+        </Button>
+      </div>
 
       {isDockerEnv && (
-        <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-xs text-blue-400 mb-3">
+        <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-xs text-blue-400">
           Running in Docker — <code className="text-xs bg-muted px-1 rounded">localhost</code> URLs are automatically routed to your host machine.
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Left column: LLM config */}
+      {/* Section 1: LLM Provider */}
+      <Section title="LLM Provider">
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">LLM Provider</h3>
-
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">Provider</Label>
+              <Label className="text-sm font-medium">Provider</Label>
               <Select value={provider} onValueChange={handleProviderChange}>
                 <SelectTrigger className="w-full h-8 text-xs">
                   <SelectValue placeholder="Select provider" />
@@ -408,13 +421,13 @@ export default function Settings() {
                 </SelectContent>
               </Select>
               {errors.provider && touched.has('llm_provider') && (
-                <p className="text-xs text-red-400">{errors.provider}</p>
+                <p className="text-sm text-red-400">{errors.provider}</p>
               )}
             </div>
 
             {provider === 'anthropic' && (
               <div className="space-y-1">
-                <Label className="text-xs">API Key</Label>
+                <Label className="text-sm font-medium">API Key</Label>
                 <Input
                   type="password"
                   placeholder="sk-ant-api03-..."
@@ -423,14 +436,14 @@ export default function Settings() {
                   className="h-8 text-xs"
                 />
                 {errors.apiKey && touched.has('anthropic_key') && (
-                  <p className="text-xs text-red-400">{errors.apiKey}</p>
+                  <p className="text-sm text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
 
             {showLlmApiKey && (
               <div className="space-y-1">
-                <Label className="text-xs">API Key</Label>
+                <Label className="text-sm font-medium">API Key</Label>
                 <Input
                   type={provider === 'ollama' ? 'text' : 'password'}
                   placeholder={defaults.keyPlaceholder}
@@ -440,7 +453,7 @@ export default function Settings() {
                   className="h-8 text-xs"
                 />
                 {errors.apiKey && touched.has('llm_api_key') && (
-                  <p className="text-xs text-red-400">{errors.apiKey}</p>
+                  <p className="text-sm text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
@@ -448,7 +461,7 @@ export default function Settings() {
 
           {showBaseUrl && (
             <div className="space-y-1">
-              <Label className="text-xs">Base URL</Label>
+              <Label className="text-sm font-medium">Base URL</Label>
               <Input
                 placeholder={defaults.baseUrl}
                 value={config.llm_base_url || ''}
@@ -456,7 +469,7 @@ export default function Settings() {
                 className="h-8 text-xs"
               />
               {errors.baseUrl && touched.has('llm_base_url') && (
-                <p className="text-xs text-red-400">{errors.baseUrl}</p>
+                <p className="text-sm text-red-400">{errors.baseUrl}</p>
               )}
             </div>
           )}
@@ -480,140 +493,190 @@ export default function Settings() {
             />
           </div>
         </div>
+      </Section>
 
-        {/* Right column: Connections */}
+      {/* Section 2: Performance */}
+      <Section title="Performance">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Max Concurrent</Label>
+            <Input
+              type="number"
+              min={1}
+              max={100}
+              placeholder="10"
+              value={config.max_concurrent || 10}
+              onChange={(e) => updateField('max_concurrent', parseInt(e.target.value, 10) || 10)}
+              className="h-8 text-xs"
+            />
+            <p className="text-sm text-muted-foreground">Parallel LLM calls</p>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Fast Max Tokens</Label>
+            <Input
+              type="number"
+              min={256}
+              max={65536}
+              placeholder="4096"
+              value={config.fast_max_tokens || 4096}
+              onChange={(e) => updateField('fast_max_tokens', parseInt(e.target.value, 10) || 4096)}
+              className="h-8 text-xs"
+            />
+            <p className="text-sm text-muted-foreground">Fast model output cap</p>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Deep Max Tokens</Label>
+            <Input
+              type="number"
+              min={256}
+              max={65536}
+              placeholder="8192"
+              value={config.deep_max_tokens || 8192}
+              onChange={(e) => updateField('deep_max_tokens', parseInt(e.target.value, 10) || 8192)}
+              className="h-8 text-xs"
+            />
+            <p className="text-sm text-muted-foreground">Deep model output cap</p>
+          </div>
+        </div>
+      </Section>
+
+      {/* Section 3: Memories Server */}
+      <Section title="Memories Server">
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Connections</h3>
-
-          {/* Memories */}
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Memories URL</Label>
-                <Input
-                  placeholder="http://localhost:8900"
-                  value={config.memories_url || ''}
-                  onChange={(e) => updateField('memories_url', e.target.value)}
-                  className="h-8 text-xs"
-                />
-                {errors.memoriesUrl && touched.has('memories_url') && (
-                  <p className="text-xs text-red-400">{errors.memoriesUrl}</p>
-                )}
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Memories Key</Label>
-                <Input
-                  type="password"
-                  placeholder="(optional)"
-                  value={config.memories_key || ''}
-                  onChange={(e) => updateField('memories_key', e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={testConnection} disabled={connectionStatus === 'testing'}>
-                {connectionStatus === 'testing' ? 'Testing...' : 'Test'}
-              </Button>
-              {connectionStatus === 'connected' && <Badge variant="default" className="text-xs">Connected</Badge>}
-              {connectionStatus === 'unreachable' && (
-                <>
-                  <Badge variant="destructive" className="text-xs">Unreachable</Badge>
-                  {connectionError && <span className="text-xs text-red-400">{connectionError}</span>}
-                </>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Memories URL</Label>
+              <Input
+                placeholder="http://localhost:8900"
+                value={config.memories_url || ''}
+                onChange={(e) => updateField('memories_url', e.target.value)}
+                className="h-8 text-xs"
+              />
+              {errors.memoriesUrl && touched.has('memories_url') && (
+                <p className="text-sm text-red-400">{errors.memoriesUrl}</p>
               )}
             </div>
-          </div>
-
-          <div className="border-t border-border pt-2 space-y-2">
-            {/* GitHub */}
             <div className="space-y-1">
-              <Label className="text-xs">GitHub Token</Label>
+              <Label className="text-sm font-medium">Memories Key</Label>
               <Input
                 type="password"
-                placeholder="ghp_... (optional)"
-                value={config.github_token || ''}
-                onChange={(e) => updateField('github_token', e.target.value)}
-                className="h-7 text-xs"
+                placeholder="(optional)"
+                value={config.memories_key || ''}
+                onChange={(e) => updateField('memories_key', e.target.value)}
+                className="h-8 text-xs"
               />
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={testConnection} disabled={connectionStatus === 'testing'}>
+              {connectionStatus === 'testing' ? 'Testing...' : 'Test'}
+            </Button>
+            {connectionStatus === 'connected' && <Badge variant="default" className="text-xs">Connected</Badge>}
+            {connectionStatus === 'unreachable' && (
+              <>
+                <Badge variant="destructive" className="text-xs">Unreachable</Badge>
+                {connectionError && <span className="text-sm text-red-400">{connectionError}</span>}
+              </>
+            )}
+          </div>
+        </div>
+      </Section>
 
-            {/* Jira */}
-            <div className="space-y-1">
-              <Label className="text-xs">Jira Base URL</Label>
+      {/* Section 4: Integrations */}
+      <Section title="Integrations">
+        <div className="space-y-3">
+          {/* GitHub */}
+          <div className="flex items-center gap-3">
+            <span className={cn('h-2 w-2 shrink-0 rounded-full',
+              config.github_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+            )} />
+            <Label className="w-24 shrink-0 text-sm font-medium">GitHub</Label>
+            <Input
+              type="password"
+              placeholder="ghp_... (optional)"
+              value={config.github_token || ''}
+              onChange={(e) => updateField('github_token', e.target.value)}
+              className="flex-1 h-8 text-xs"
+            />
+          </div>
+
+          {/* Jira */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full',
+                config.jira_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+              )} />
+              <Label className="w-24 shrink-0 text-sm font-medium">Jira</Label>
               <Input
                 placeholder="https://your-org.atlassian.net"
                 value={config.jira_base_url || ''}
                 onChange={(e) => updateField('jira_base_url', e.target.value)}
-                className="h-7 text-xs"
+                className="flex-1 h-8 text-xs"
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Jira Email</Label>
-                <Input
-                  placeholder="user@company.com"
-                  value={config.jira_email || ''}
-                  onChange={(e) => updateField('jira_email', e.target.value)}
-                  className="h-7 text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Jira Token</Label>
-                <Input
-                  type="password"
-                  placeholder="(optional)"
-                  value={config.jira_token || ''}
-                  onChange={(e) => updateField('jira_token', e.target.value)}
-                  className="h-7 text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Linear */}
-            <div className="space-y-1">
-              <Label className="text-xs">Linear API Key</Label>
+            <div className="ml-[calc(0.5rem+8px+0.75rem+6rem)] grid grid-cols-2 gap-2">
               <Input
-                type="password"
-                placeholder="lin_api_..."
-                value={config.linear_token || ''}
-                onChange={(e) => updateField('linear_token', e.target.value)}
-                className="h-7 text-xs"
+                placeholder="user@company.com"
+                value={config.jira_email || ''}
+                onChange={(e) => updateField('jira_email', e.target.value)}
+                className="h-8 text-xs"
               />
-            </div>
-
-            {/* Notion */}
-            <div className="space-y-1">
-              <Label className="text-xs">Notion Token</Label>
               <Input
                 type="password"
-                placeholder="ntn_..."
-                value={config.notion_token || ''}
-                onChange={(e) => updateField('notion_token', e.target.value)}
-                className="h-7 text-xs"
-              />
-            </div>
-
-            {/* Slack */}
-            <div className="space-y-1">
-              <Label className="text-xs">Slack Bot Token</Label>
-              <Input
-                type="password"
-                placeholder="xoxb-..."
-                value={config.slack_token || ''}
-                onChange={(e) => updateField('slack_token', e.target.value)}
-                className="h-7 text-xs"
+                placeholder="API Token (optional)"
+                value={config.jira_token || ''}
+                onChange={(e) => updateField('jira_token', e.target.value)}
+                className="h-8 text-xs"
               />
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="mt-3">
-        <Button size="sm" onClick={save} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Settings'}
-        </Button>
-      </div>
+          {/* Linear */}
+          <div className="flex items-center gap-3">
+            <span className={cn('h-2 w-2 shrink-0 rounded-full',
+              config.linear_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+            )} />
+            <Label className="w-24 shrink-0 text-sm font-medium">Linear</Label>
+            <Input
+              type="password"
+              placeholder="lin_api_... (optional)"
+              value={config.linear_token || ''}
+              onChange={(e) => updateField('linear_token', e.target.value)}
+              className="flex-1 h-8 text-xs"
+            />
+          </div>
+
+          {/* Notion */}
+          <div className="flex items-center gap-3">
+            <span className={cn('h-2 w-2 shrink-0 rounded-full',
+              config.notion_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+            )} />
+            <Label className="w-24 shrink-0 text-sm font-medium">Notion</Label>
+            <Input
+              type="password"
+              placeholder="ntn_... (optional)"
+              value={config.notion_token || ''}
+              onChange={(e) => updateField('notion_token', e.target.value)}
+              className="flex-1 h-8 text-xs"
+            />
+          </div>
+
+          {/* Slack */}
+          <div className="flex items-center gap-3">
+            <span className={cn('h-2 w-2 shrink-0 rounded-full',
+              config.slack_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+            )} />
+            <Label className="w-24 shrink-0 text-sm font-medium">Slack</Label>
+            <Input
+              type="password"
+              placeholder="xoxb-... (optional)"
+              value={config.slack_token || ''}
+              onChange={(e) => updateField('slack_token', e.target.value)}
+              className="flex-1 h-8 text-xs"
+            />
+          </div>
+        </div>
+      </Section>
     </div>
   )
 }

@@ -10,6 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Section, StatCard } from '@/components/Section'
+import { cn } from '@/lib/utils'
 
 interface Project {
   name: string
@@ -35,6 +37,20 @@ interface RunStatus {
   error?: string
 }
 
+interface Stats {
+  total_projects: number
+  total_atoms: number
+  total_files: number
+  memories: { healthy: boolean; latency?: string }
+  recent_runs: Array<{
+    project: string
+    status: string
+    result?: { atoms?: number }
+    error?: string
+    started_at?: string
+  }>
+}
+
 function getTimeAgo(dateStr: string): string {
   if (!dateStr) return 'never'
   const date = new Date(dateStr)
@@ -54,6 +70,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [runStatuses, setRunStatuses] = useState<Record<string, RunStatus>>({})
+  const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
@@ -72,70 +89,139 @@ export default function Dashboard() {
       setRunStatuses(runMap)
     }).catch(console.error)
       .finally(() => setLoading(false))
+
+    fetch('/api/stats').then(r => r.json()).then(setStats).catch(() => {})
   }, [])
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold">Dashboard</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="text-2xl font-bold">Dashboard</h2>
+          <p className="text-sm text-muted-foreground">
             {projects.length} project{projects.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {health && (
-            <Badge variant={health.memories_healthy ? 'default' : 'destructive'} className="text-xs">
-              {health.memories_healthy ? 'Memories \u2713' : 'Memories \u2717'}
-            </Badge>
-          )}
           <Button size="sm" onClick={() => navigate('/index')}>Index New</Button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 mb-6">
+        <StatCard label="Projects" value={stats?.total_projects ?? projects.length} />
+        <StatCard label="Files" value={stats?.total_files ?? projects.reduce((sum, p) => sum + p.file_count, 0)} />
+        <StatCard label="Atoms" value={stats?.total_atoms ?? '\u2014'} />
+        <StatCard
+          label="Memories"
+          value={stats?.memories?.latency ?? '\u2014'}
+          status={health?.memories_healthy ? 'ok' : stats === null ? 'unknown' : 'error'}
+        />
       </div>
 
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading...</p>
       ) : projects.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground mb-4 text-sm">No indexed projects yet.</p>
-          <Button size="sm" onClick={() => navigate('/index')}>Index Your First Project</Button>
-        </div>
+        <Section>
+          <div className="flex flex-col items-center gap-4 py-12 text-center">
+            <div className="rounded-full bg-primary/10 p-4">
+              <span className="text-3xl">{'\u25EB'}</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">No indexed projects yet</h3>
+              <p className="mt-1 text-sm text-muted-foreground">Get started by indexing your first codebase</p>
+            </div>
+            <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+              <span>1. Configure your LLM provider in Settings</span>
+              <span>2. Index your first project</span>
+            </div>
+            <Button onClick={() => navigate('/index')}>Index Your First Project</Button>
+          </div>
+        </Section>
       ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">Name</TableHead>
-                <TableHead className="text-xs hidden sm:table-cell">Path</TableHead>
-                <TableHead className="text-xs w-16">Files</TableHead>
-                <TableHead className="text-xs w-24">Indexed</TableHead>
-                <TableHead className="text-xs w-20 hidden sm:table-cell">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects.map((p) => {
-                const run = runStatuses[p.name]
-                return (
-                  <TableRow
-                    key={p.name}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
-                  >
-                    <TableCell className="text-sm font-medium">{p.name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:table-cell" title={p.path}>{p.path}</TableCell>
-                    <TableCell className="text-xs">{p.file_count}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
-                      {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}
-                      {(!run || run.status === 'complete') && <Badge variant="default" className="text-xs">Indexed</Badge>}
-                    </TableCell>
+        <>
+          <Section title="Projects">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-sm font-medium">Name</TableHead>
+                    <TableHead className="text-sm font-medium hidden sm:table-cell">Path</TableHead>
+                    <TableHead className="text-sm font-medium w-16">Files</TableHead>
+                    <TableHead className="text-sm font-medium w-24">Indexed</TableHead>
+                    <TableHead className="text-sm font-medium w-20 hidden sm:table-cell">Status</TableHead>
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                </TableHeader>
+                <TableBody>
+                  {projects.map((p) => {
+                    const run = runStatuses[p.name]
+                    return (
+                      <TableRow
+                        key={p.name}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
+                      >
+                        <TableCell className="text-sm font-medium">{p.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground truncate max-w-[200px] hidden sm:table-cell" title={p.path}>{p.path}</TableCell>
+                        <TableCell className="text-sm">{p.file_count}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
+                          {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}
+                          {(!run || run.status === 'complete') && <Badge variant="default" className="text-xs">Indexed</Badge>}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </Section>
+
+          {(stats?.recent_runs?.length ?? 0) > 0 && (
+            <Section title="Recent Activity" className="mt-6">
+              <div className="space-y-2">
+                {stats!.recent_runs.map((run, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-md border border-border/30 px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className={cn(
+                        'h-2 w-2 rounded-full',
+                        run.status === 'complete' ? 'bg-emerald-500' :
+                        run.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                      )} />
+                      <span className="font-medium">{run.project}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {run.status === 'complete' ? `${run.result?.atoms ?? 0} atoms` : run.error ?? run.status}
+                      </span>
+                    </div>
+                    <span className="text-sm text-muted-foreground">{getTimeAgo(run.started_at ?? '')}</span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {!stats?.recent_runs?.length && Object.keys(runStatuses).length > 0 && (
+            <Section title="Active Runs" className="mt-6">
+              <div className="space-y-2">
+                {Object.values(runStatuses).map((run, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-md border border-border/30 px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className={cn(
+                        'h-2 w-2 rounded-full',
+                        run.status === 'complete' ? 'bg-emerald-500' :
+                        run.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                      )} />
+                      <span className="font-medium">{run.project}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {run.status === 'complete' && run.result ? `${run.result.atoms} atoms` : run.error ?? run.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+        </>
       )}
     </div>
   )

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { QueryResult } from '@/components/QueryResult'
+import { Section } from '@/components/Section'
 
 interface Project {
   name: string
@@ -22,6 +23,12 @@ interface Result {
   score: number
   source: string
 }
+
+const QUICK_QUERIES = [
+  'authentication flow', 'error handling', 'API endpoints',
+  'database schema', 'configuration', 'middleware',
+  'testing patterns', 'data models',
+]
 
 const tiers = ['mini', 'standard', 'full'] as const
 type Tier = (typeof tiers)[number]
@@ -78,92 +85,116 @@ export default function Query() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-3">Query</h2>
+      <h2 className="text-2xl font-bold mb-6">Query</h2>
 
-      {/* Single-row search bar with all filters inline */}
-      <div className="flex items-end gap-3 flex-wrap mb-3">
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="query" className="text-xs mb-1 block">Search Query</Label>
-          <Input
-            id="query"
-            placeholder="Describe what you're looking for..."
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
+      <Section title="Search">
+        {/* Single-row search bar with all filters inline */}
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="flex-1 min-w-[200px]">
+            <Label htmlFor="query" className="text-sm font-medium mb-1 block">Search Query</Label>
+            <Input
+              id="query"
+              placeholder="Describe what you're looking for..."
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
 
-        <div className="w-40">
-          <Label className="text-xs mb-1 block">Project</Label>
-          <Select value={project} onValueChange={setProject}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((p) => (
-                <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+          <div className="w-40">
+            <Label className="text-sm font-medium mb-1 block">Project</Label>
+            <Select value={project} onValueChange={setProject}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium mb-1 block">Tier</Label>
+            <div className="flex rounded-md overflow-hidden border border-border">
+              {tiers.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTier(t)}
+                  className={cn(
+                    'px-2.5 py-1.5 text-sm capitalize transition-colors',
+                    tier === t
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {t}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
+            </div>
+          </div>
 
-        <div>
-          <Label className="text-xs mb-1 block">Tier</Label>
-          <div className="flex rounded-md overflow-hidden border border-border">
-            {tiers.map((t) => (
+          <div className="w-16">
+            <Label htmlFor="count" className="text-sm font-medium mb-1 block">Count</Label>
+            <Input
+              id="count"
+              type="number"
+              min={1}
+              max={50}
+              value={k}
+              onChange={(e) => setK(Math.max(1, Math.min(50, Number(e.target.value))))}
+              className="w-16"
+            />
+          </div>
+
+          <Button size="sm" onClick={search} disabled={searching || !text.trim() || !project}>
+            {searching ? 'Searching...' : 'Search'}
+          </Button>
+        </div>
+      </Section>
+
+      {!searched && (
+        <Section title="Quick Queries" className="mt-6">
+          <p className="mb-3 text-sm text-muted-foreground">Try one of these to get started:</p>
+          <div className="flex flex-wrap gap-2">
+            {QUICK_QUERIES.map(q => (
               <button
-                key={t}
-                onClick={() => setTier(t)}
-                className={cn(
-                  'px-2.5 py-1.5 text-xs capitalize transition-colors',
-                  tier === t
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary text-muted-foreground hover:text-foreground'
-                )}
+                key={q}
+                onClick={() => setText(q)}
+                className="rounded-full border border-border/50 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
               >
-                {t}
+                {q}
               </button>
             ))}
           </div>
-        </div>
+        </Section>
+      )}
 
-        <div className="w-16">
-          <Label htmlFor="count" className="text-xs mb-1 block">Count</Label>
-          <Input
-            id="count"
-            type="number"
-            min={1}
-            max={50}
-            value={k}
-            onChange={(e) => setK(Math.max(1, Math.min(50, Number(e.target.value))))}
-            className="w-16"
-          />
-        </div>
+      {searched && results.length > 0 && (
+        <Section title={`Results (${results.length} matches)`} className="mt-6">
+          {results.slice(0, visibleCount).map((r, i) => (
+            <QueryResult key={r.id || i} index={i + 1} source={r.source} score={r.score} text={r.text} />
+          ))}
+          {results.length > visibleCount && (
+            <div className="text-center py-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+              >
+                Show more ({results.length - visibleCount} remaining)
+              </Button>
+            </div>
+          )}
+        </Section>
+      )}
 
-        <Button size="sm" onClick={search} disabled={searching || !text.trim() || !project}>
-          {searching ? 'Searching...' : 'Search'}
-        </Button>
-      </div>
-
-      <div>
-        {results.slice(0, visibleCount).map((r, i) => (
-          <QueryResult key={r.id || i} index={i + 1} source={r.source} score={r.score} text={r.text} />
-        ))}
-        {results.length > visibleCount && (
-          <div className="text-center py-3">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
-            >
-              Show more ({results.length - visibleCount} remaining)
-            </Button>
-          </div>
-        )}
-        {searched && results.length === 0 && (
-          <p className="text-muted-foreground text-xs py-8 text-center">No results found.</p>
-        )}
-      </div>
+      {searched && results.length === 0 && (
+        <Section className="mt-6">
+          <p className="text-sm text-muted-foreground text-center py-8">No results found. Try a different query or project.</p>
+        </Section>
+      )}
     </div>
   )
 }

@@ -8,6 +8,8 @@ import { FolderPicker } from '@/components/FolderPicker'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { ProgressBar } from '@/components/ProgressBar'
+import { Section } from '@/components/Section'
+import { cn } from '@/lib/utils'
 
 type PageState = 'idle' | 'starting' | 'running' | 'complete' | 'error' | 'stopped'
 
@@ -51,6 +53,12 @@ export default function IndexRun() {
   const eventSourceRef = useRef<EventSource | null>(null)
   const stateRef = useRef<PageState>('idle')
   const logEndRef = useRef<HTMLDivElement>(null)
+  const [recentRuns, setRecentRuns] = useState<Array<{
+    project: string
+    status: string
+    result?: { atoms?: number; files?: number }
+    error?: string
+  }>>([])
 
   function setPageState(s: PageState) {
     stateRef.current = s
@@ -74,6 +82,7 @@ export default function IndexRun() {
     fetch('/api/projects/runs')
       .then(r => r.json())
       .then((runs: Array<{ project: string; status: string; result?: CompleteData; error?: string }>) => {
+        if (Array.isArray(runs)) setRecentRuns(runs)
         if (runs.length > 0) {
           const lastRun = runs[0]
           if (lastRun.status === 'running') {
@@ -217,200 +226,230 @@ export default function IndexRun() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-3">Index Project</h2>
+      <h2 className="text-2xl font-bold mb-6">Index Project</h2>
 
       {state === 'idle' && (
-        <div className="space-y-3">
-          {/* Tab toggle */}
-          <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
-            <button
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setInputMode('local')}
-            >
-              Local Path
-            </button>
-            <button
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setInputMode('git')}
-            >
-              Git URL
-            </button>
-          </div>
+        <Section title="Source">
+          <div className="space-y-3">
+            {/* Tab toggle */}
+            <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+              <button
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setInputMode('local')}
+              >
+                Local Path
+              </button>
+              <button
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setInputMode('git')}
+              >
+                Git URL
+              </button>
+            </div>
 
-          {/* Single-row form */}
-          <div className="flex items-end gap-3 flex-wrap">
-            {inputMode === 'local' && (
-              <div className="flex-1 min-w-[200px]">
-                <Label className="text-xs mb-1 block">Project Path</Label>
-                <FolderPicker value={path} onChange={setPath} />
-              </div>
-            )}
-
-            {inputMode === 'git' && (
-              <>
+            {/* Single-row form */}
+            <div className="flex items-end gap-3 flex-wrap">
+              {inputMode === 'local' && (
                 <div className="flex-1 min-w-[200px]">
-                  <Label className="text-xs mb-1 block">Repository URL</Label>
-                  <Input
-                    placeholder="https://github.com/user/repo"
-                    value={gitUrl}
-                    onChange={(e) => setGitUrl(e.target.value)}
-                  />
+                  <Label className="text-sm font-medium mb-1 block">Project Path</Label>
+                  <FolderPicker value={path} onChange={setPath} />
                 </div>
-                <div className="w-32">
-                  <Label className="text-xs mb-1 block">Branch</Label>
-                  <Input
-                    placeholder="main"
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
+              )}
 
-            <div className="w-36">
-              <Label className="text-xs mb-1 block">Module (opt.)</Label>
-              <Input
-                placeholder="e.g. go"
-                value={module}
-                onChange={(e) => setModule(e.target.value)}
-              />
+              {inputMode === 'git' && (
+                <>
+                  <div className="flex-1 min-w-[200px]">
+                    <Label className="text-sm font-medium mb-1 block">Repository URL</Label>
+                    <Input
+                      placeholder="https://github.com/user/repo"
+                      value={gitUrl}
+                      onChange={(e) => setGitUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="w-32">
+                    <Label className="text-sm font-medium mb-1 block">Branch</Label>
+                    <Input
+                      placeholder="main"
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="w-36">
+                <Label className="text-sm font-medium mb-1 block">Module (opt.)</Label>
+                <Input
+                  placeholder="e.g. go"
+                  value={module}
+                  onChange={(e) => setModule(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pb-1">
+                <Switch checked={incremental} onCheckedChange={setIncremental} id="incremental" />
+                <Label htmlFor="incremental" className="text-sm font-medium">Incremental</Label>
+              </div>
+
+              <Button size="sm" onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
+                Start
+              </Button>
             </div>
-
-            <div className="flex items-center gap-2 pb-1">
-              <Switch checked={incremental} onCheckedChange={setIncremental} id="incremental" />
-              <Label htmlFor="incremental" className="text-xs">Incremental</Label>
-            </div>
-
-            <Button size="sm" onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
-              Start
-            </Button>
           </div>
-        </div>
+        </Section>
+      )}
+
+      {state === 'idle' && recentRuns.length > 0 && (
+        <Section title="Recent Runs" className="mt-6">
+          <div className="space-y-2">
+            {recentRuns.slice(0, 5).map((run, i) => (
+              <div key={i} className="flex items-center justify-between rounded-md border border-border/30 px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    'h-2 w-2 rounded-full',
+                    run.status === 'complete' ? 'bg-emerald-500' :
+                    run.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                  )} />
+                  <span className="font-medium">{run.project}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {run.status === 'complete' && run.result ? `${run.result.atoms ?? 0} atoms` : run.error ?? run.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
       )}
 
       {state === 'starting' && (
-        <p className="text-muted-foreground text-sm">Starting indexing...</p>
+        <Section title="Progress" className="mt-6">
+          <p className="text-muted-foreground text-sm">Starting indexing...</p>
+        </Section>
       )}
 
       {state === 'stopped' && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="text-xs">Stopped</Badge>
+        <Section title="Progress" className="mt-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">Stopped</Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">Indexing was stopped by user</p>
+            <Button variant="secondary" size="sm" onClick={reset}>Index Again</Button>
           </div>
-          <p className="text-xs text-muted-foreground">Indexing was stopped by user</p>
-          <Button variant="secondary" size="sm" onClick={reset}>Index Again</Button>
-        </div>
+        </Section>
       )}
 
       {(state === 'running' || state === 'complete' || state === 'error') && (
-        <div className="space-y-3">
-          <div className="flex gap-3">
-            {/* Left: progress / result */}
-            <div className="flex-1 min-w-0">
-              {state === 'running' && (
-                <div className="space-y-2">
-                  <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={stopIndexing}
-                    disabled={stopping}
-                  >
-                    {stopping ? 'Stopping...' : 'Stop'}
-                  </Button>
-                </div>
-              )}
+        <Section title="Progress" className="mt-6">
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              {/* Left: progress / result */}
+              <div className="flex-1 min-w-0">
+                {state === 'running' && (
+                  <div className="space-y-2">
+                    <ProgressBar phase={progress.phase} done={progress.done} total={progress.total} />
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={stopIndexing}
+                      disabled={stopping}
+                    >
+                      {stopping ? 'Stopping...' : 'Stop'}
+                    </Button>
+                  </div>
+                )}
 
-              {state === 'complete' && result && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="default" className="text-xs">Done</Badge>
-                    <span className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</span>
+                {state === 'complete' && result && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="default" className="text-xs">Done</Badge>
+                      <span className="text-sm text-muted-foreground">Elapsed: {result.elapsed}</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Modules</span>
+                        <p className="font-medium">{result.modules}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Files</span>
+                        <p className="font-medium">{result.files}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Atoms</span>
+                        <p className="font-medium">{result.atoms}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Errors</span>
+                        <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'font-medium'}>{result.errors}</p>
+                      </div>
+                    </div>
+                    {result.errors > 0 && result.error_messages && result.error_messages.length > 0 && (
+                      <div className="border-t border-border pt-2">
+                        <button
+                          onClick={() => setErrorsExpanded(!errorsExpanded)}
+                          className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors w-full text-left"
+                        >
+                          <span className={`transition-transform ${errorsExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                          <span>{result.error_messages.length} error{result.error_messages.length !== 1 ? 's' : ''}</span>
+                        </button>
+                        {errorsExpanded && (
+                          <div className="mt-1 bg-muted/50 rounded-md p-2 max-h-40 overflow-y-auto font-mono text-xs space-y-1">
+                            {result.error_messages.map((msg, i) => (
+                              <div key={i} className="flex gap-2">
+                                <span className="text-red-400 shrink-0">&#10007;</span>
+                                <span className="text-red-400">{msg}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <Button variant="secondary" size="sm" onClick={reset}>Index Another</Button>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Modules</span>
-                      <p className="font-medium">{result.modules}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Files</span>
-                      <p className="font-medium">{result.files}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Atoms</span>
-                      <p className="font-medium">{result.atoms}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Errors</span>
-                      <p className={result.errors > 0 ? 'text-red-400 font-medium' : 'font-medium'}>{result.errors}</p>
-                    </div>
-                  </div>
-                  {result.errors > 0 && result.error_messages && result.error_messages.length > 0 && (
-                    <div className="border-t border-border pt-2">
-                      <button
-                        onClick={() => setErrorsExpanded(!errorsExpanded)}
-                        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors w-full text-left"
-                      >
-                        <span className={`transition-transform ${errorsExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                        <span>{result.error_messages.length} error{result.error_messages.length !== 1 ? 's' : ''}</span>
-                      </button>
-                      {errorsExpanded && (
-                        <div className="mt-1 bg-muted/50 rounded-md p-2 max-h-40 overflow-y-auto font-mono text-xs space-y-1">
-                          {result.error_messages.map((msg, i) => (
-                            <div key={i} className="flex gap-2">
-                              <span className="text-red-400 shrink-0">&#10007;</span>
-                              <span className="text-red-400">{msg}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <Button variant="secondary" size="sm" onClick={reset}>Index Another</Button>
-                </div>
-              )}
+                )}
 
-              {state === 'error' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="destructive" className="text-xs">Failed</Badge>
+                {state === 'error' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="destructive" className="text-xs">Failed</Badge>
+                    </div>
+                    <p className="text-sm text-red-400">{errorMsg}</p>
+                    <Button variant="secondary" size="sm" onClick={reset}>Try Again</Button>
                   </div>
-                  <p className="text-xs text-red-400">{errorMsg}</p>
-                  <Button variant="secondary" size="sm" onClick={reset}>Try Again</Button>
+                )}
+              </div>
+
+              {/* Right: log */}
+              {logs.length > 0 && (
+                <div className="flex-1 min-w-0 bg-muted/50 rounded-md p-2 max-h-80 overflow-y-auto font-mono text-xs space-y-1">
+                  {logs.map((entry, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className={
+                        entry.level === 'error' ? 'text-red-400 shrink-0' :
+                        entry.level === 'warn' ? 'text-yellow-400 shrink-0' :
+                        'text-muted-foreground shrink-0'
+                      }>
+                        {entry.level === 'error' ? '\u2717' : entry.level === 'warn' ? '\u26A0' : '\u25B8'}
+                      </span>
+                      <span className={
+                        entry.level === 'error' ? 'text-red-400' :
+                        entry.level === 'warn' ? 'text-yellow-400' :
+                        'text-foreground'
+                      }>
+                        {entry.message}
+                      </span>
+                    </div>
+                  ))}
+                  <div ref={logEndRef} />
                 </div>
               )}
             </div>
-
-            {/* Right: log */}
-            {logs.length > 0 && (
-              <div className="flex-1 min-w-0 bg-muted/50 rounded-md p-2 max-h-80 overflow-y-auto font-mono text-xs space-y-1">
-                {logs.map((entry, i) => (
-                  <div key={i} className="flex gap-2">
-                    <span className={
-                      entry.level === 'error' ? 'text-red-400 shrink-0' :
-                      entry.level === 'warn' ? 'text-yellow-400 shrink-0' :
-                      'text-muted-foreground shrink-0'
-                    }>
-                      {entry.level === 'error' ? '\u2717' : entry.level === 'warn' ? '\u26A0' : '\u25B8'}
-                    </span>
-                    <span className={
-                      entry.level === 'error' ? 'text-red-400' :
-                      entry.level === 'warn' ? 'text-yellow-400' :
-                      'text-foreground'
-                    }>
-                      {entry.message}
-                    </span>
-                  </div>
-                ))}
-                <div ref={logEndRef} />
-              </div>
-            )}
           </div>
-        </div>
+        </Section>
       )}
     </div>
   )
