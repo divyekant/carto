@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-03-01
+
+### Added
+
+- **Data-rich dashboard** — stat cards (Projects, Files, Atoms, Memories health), enriched project table with status badges, recent activity feed, and guided empty state
+- **Always-expanded sidebar** — 224px sidebar with navigation, live server health status, version display, and theme toggle
+- **Section & StatCard components** — reusable card wrappers for consistent page structure across all views
+- **Settings card layout** — reorganized into 4 grouped sections (LLM Provider, Performance, Memories Server, Integrations) with status indicators
+- **Index page enhancements** — card-wrapped form and progress sections, recent runs panel when idle
+- **Query page enhancements** — quick query suggestions, result cards with color-coded relevance badges
+- **Monochrome slate theme** — cohesive design language with no color accent, clean contrast in both light and dark modes
+
+### Changed
+
+- Typography scaled up across all pages (text-xs → text-sm, text-sm → text-base) for better readability
+- Content padding increased from p-4/p-6 to p-4/p-8 for comfortable density
+- Favicon updated to monochrome slate design
+- Color tokens rewritten in OKLch with desaturated slate palette
+
 ## [1.0.0] - 2026-02-28
 
 First stable release of Carto — an intent-aware codebase intelligence tool that scans codebases, builds a 7-layer semantic index using LLMs, and stores it in Memories for fast retrieval.

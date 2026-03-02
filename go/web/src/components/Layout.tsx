@@ -99,7 +99,7 @@ function SidebarContent({ health, onNavClick }: { health: { memories_healthy: bo
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-        <span className="text-xs text-muted-foreground">v1.0.0</span>
+        <span className="text-xs text-muted-foreground">v1.1.0</span>
         <ThemeToggle />
       </div>
     </>
