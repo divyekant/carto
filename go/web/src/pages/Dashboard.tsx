@@ -78,8 +78,8 @@ export default function Dashboard() {
     <div>
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-lg font-semibold">Dashboard</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="text-2xl font-bold">Dashboard</h2>
+          <p className="text-sm text-muted-foreground">
             {projects.length} project{projects.length !== 1 ? 's' : ''}
           </p>
         </div>
@@ -105,11 +105,11 @@ export default function Dashboard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-xs">Name</TableHead>
-                <TableHead className="text-xs hidden sm:table-cell">Path</TableHead>
-                <TableHead className="text-xs w-16">Files</TableHead>
-                <TableHead className="text-xs w-24">Indexed</TableHead>
-                <TableHead className="text-xs w-20 hidden sm:table-cell">Status</TableHead>
+                <TableHead className="text-sm font-medium">Name</TableHead>
+                <TableHead className="text-sm font-medium hidden sm:table-cell">Path</TableHead>
+                <TableHead className="text-sm font-medium w-16">Files</TableHead>
+                <TableHead className="text-sm font-medium w-24">Indexed</TableHead>
+                <TableHead className="text-sm font-medium w-20 hidden sm:table-cell">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -122,9 +122,9 @@ export default function Dashboard() {
                     onClick={() => navigate(`/projects/${encodeURIComponent(p.name)}`)}
                   >
                     <TableCell className="text-sm font-medium">{p.name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px] hidden sm:table-cell" title={p.path}>{p.path}</TableCell>
-                    <TableCell className="text-xs">{p.file_count}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground truncate max-w-[200px] hidden sm:table-cell" title={p.path}>{p.path}</TableCell>
+                    <TableCell className="text-sm">{p.file_count}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{getTimeAgo(p.indexed_at)}</TableCell>
                     <TableCell className="hidden sm:table-cell">
                       {run?.status === 'running' && <Badge variant="secondary" className="text-xs">Running</Badge>}
                       {run?.status === 'error' && <Badge variant="destructive" className="text-xs">Error</Badge>}

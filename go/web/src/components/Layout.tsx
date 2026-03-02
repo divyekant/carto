@@ -115,7 +115,7 @@ export function Layout() {
       </aside>
 
       {/* Main content — leave room for icon sidebar */}
-      <main className="flex-1 overflow-y-auto p-3 pt-14 md:p-5 md:pt-5 md:ml-12">
+      <main className="flex-1 overflow-y-auto p-4 pt-16 md:p-8 md:pt-8 md:ml-12">
         <Outlet />
       </main>
     </div>

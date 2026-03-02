@@ -217,14 +217,14 @@ export default function IndexRun() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-3">Index Project</h2>
+      <h2 className="text-2xl font-bold mb-3">Index Project</h2>
 
       {state === 'idle' && (
         <div className="space-y-3">
           {/* Tab toggle */}
           <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
             <button
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+              className={`px-3 py-1 text-sm rounded-md transition-colors ${
                 inputMode === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setInputMode('local')}
@@ -232,7 +232,7 @@ export default function IndexRun() {
               Local Path
             </button>
             <button
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+              className={`px-3 py-1 text-sm rounded-md transition-colors ${
                 inputMode === 'git' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setInputMode('git')}
@@ -245,7 +245,7 @@ export default function IndexRun() {
           <div className="flex items-end gap-3 flex-wrap">
             {inputMode === 'local' && (
               <div className="flex-1 min-w-[200px]">
-                <Label className="text-xs mb-1 block">Project Path</Label>
+                <Label className="text-sm font-medium mb-1 block">Project Path</Label>
                 <FolderPicker value={path} onChange={setPath} />
               </div>
             )}
@@ -253,7 +253,7 @@ export default function IndexRun() {
             {inputMode === 'git' && (
               <>
                 <div className="flex-1 min-w-[200px]">
-                  <Label className="text-xs mb-1 block">Repository URL</Label>
+                  <Label className="text-sm font-medium mb-1 block">Repository URL</Label>
                   <Input
                     placeholder="https://github.com/user/repo"
                     value={gitUrl}
@@ -261,7 +261,7 @@ export default function IndexRun() {
                   />
                 </div>
                 <div className="w-32">
-                  <Label className="text-xs mb-1 block">Branch</Label>
+                  <Label className="text-sm font-medium mb-1 block">Branch</Label>
                   <Input
                     placeholder="main"
                     value={branch}
@@ -272,7 +272,7 @@ export default function IndexRun() {
             )}
 
             <div className="w-36">
-              <Label className="text-xs mb-1 block">Module (opt.)</Label>
+              <Label className="text-sm font-medium mb-1 block">Module (opt.)</Label>
               <Input
                 placeholder="e.g. go"
                 value={module}
@@ -282,7 +282,7 @@ export default function IndexRun() {
 
             <div className="flex items-center gap-2 pb-1">
               <Switch checked={incremental} onCheckedChange={setIncremental} id="incremental" />
-              <Label htmlFor="incremental" className="text-xs">Incremental</Label>
+              <Label htmlFor="incremental" className="text-sm font-medium">Incremental</Label>
             </div>
 
             <Button size="sm" onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
@@ -301,7 +301,7 @@ export default function IndexRun() {
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="text-xs">Stopped</Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Indexing was stopped by user</p>
+          <p className="text-sm text-muted-foreground">Indexing was stopped by user</p>
           <Button variant="secondary" size="sm" onClick={reset}>Index Again</Button>
         </div>
       )}
@@ -329,7 +329,7 @@ export default function IndexRun() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Badge variant="default" className="text-xs">Done</Badge>
-                    <span className="text-xs text-muted-foreground">Elapsed: {result.elapsed}</span>
+                    <span className="text-sm text-muted-foreground">Elapsed: {result.elapsed}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 text-xs">
                     <div>
@@ -379,7 +379,7 @@ export default function IndexRun() {
                   <div className="flex items-center gap-2">
                     <Badge variant="destructive" className="text-xs">Failed</Badge>
                   </div>
-                  <p className="text-xs text-red-400">{errorMsg}</p>
+                  <p className="text-sm text-red-400">{errorMsg}</p>
                   <Button variant="secondary" size="sm" onClick={reset}>Try Again</Button>
                 </div>
               )}

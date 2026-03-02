@@ -78,12 +78,12 @@ export default function Query() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-3">Query</h2>
+      <h2 className="text-2xl font-bold mb-3">Query</h2>
 
       {/* Single-row search bar with all filters inline */}
       <div className="flex items-end gap-3 flex-wrap mb-3">
         <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="query" className="text-xs mb-1 block">Search Query</Label>
+          <Label htmlFor="query" className="text-sm font-medium mb-1 block">Search Query</Label>
           <Input
             id="query"
             placeholder="Describe what you're looking for..."
@@ -94,7 +94,7 @@ export default function Query() {
         </div>
 
         <div className="w-40">
-          <Label className="text-xs mb-1 block">Project</Label>
+          <Label className="text-sm font-medium mb-1 block">Project</Label>
           <Select value={project} onValueChange={setProject}>
             <SelectTrigger>
               <SelectValue placeholder="Select project" />
@@ -108,14 +108,14 @@ export default function Query() {
         </div>
 
         <div>
-          <Label className="text-xs mb-1 block">Tier</Label>
+          <Label className="text-sm font-medium mb-1 block">Tier</Label>
           <div className="flex rounded-md overflow-hidden border border-border">
             {tiers.map((t) => (
               <button
                 key={t}
                 onClick={() => setTier(t)}
                 className={cn(
-                  'px-2.5 py-1.5 text-xs capitalize transition-colors',
+                  'px-2.5 py-1.5 text-sm capitalize transition-colors',
                   tier === t
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-secondary text-muted-foreground hover:text-foreground'
@@ -128,7 +128,7 @@ export default function Query() {
         </div>
 
         <div className="w-16">
-          <Label htmlFor="count" className="text-xs mb-1 block">Count</Label>
+          <Label htmlFor="count" className="text-sm font-medium mb-1 block">Count</Label>
           <Input
             id="count"
             type="number"
@@ -161,7 +161,7 @@ export default function Query() {
           </div>
         )}
         {searched && results.length === 0 && (
-          <p className="text-muted-foreground text-xs py-8 text-center">No results found.</p>
+          <p className="text-muted-foreground text-sm py-8 text-center">No results found.</p>
         )}
       </div>
     </div>

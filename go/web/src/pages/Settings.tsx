@@ -23,6 +23,8 @@ interface Config {
   memories_url: string
   memories_key: string
   max_concurrent: number
+  fast_max_tokens: number
+  deep_max_tokens: number
   github_token: string
   jira_token: string
   jira_email: string
@@ -184,7 +186,7 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
 
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
+      <Label className="text-sm font-medium">{label}</Label>
       <Select
         value={showCustomInput ? CUSTOM_MODEL_VALUE : value}
         onValueChange={handleSelectChange}
@@ -216,8 +218,8 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
           autoFocus
         />
       )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
-      <p className="text-xs text-muted-foreground">{description}</p>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <p className="text-sm text-muted-foreground">{description}</p>
     </div>
   )
 }
@@ -233,6 +235,8 @@ export default function Settings() {
     memories_url: '',
     memories_key: '',
     max_concurrent: 10,
+    fast_max_tokens: 4096,
+    deep_max_tokens: 8192,
     github_token: '',
     jira_token: '',
     jira_email: '',
@@ -302,6 +306,9 @@ export default function Settings() {
         fast_model: config.fast_model,
         deep_model: config.deep_model,
         memories_url: config.memories_url,
+        max_concurrent: config.max_concurrent,
+        fast_max_tokens: config.fast_max_tokens,
+        deep_max_tokens: config.deep_max_tokens,
       }
 
       if (config.anthropic_key && !config.anthropic_key.includes('****')) patch.anthropic_key = config.anthropic_key
@@ -368,7 +375,7 @@ export default function Settings() {
   if (loading) {
     return (
       <div>
-        <h2 className="text-lg font-semibold mb-3">Settings</h2>
+        <h2 className="text-2xl font-bold mb-3">Settings</h2>
         <p className="text-muted-foreground text-sm">Loading...</p>
       </div>
     )
@@ -381,7 +388,7 @@ export default function Settings() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-3">Settings</h2>
+      <h2 className="text-2xl font-bold mb-3">Settings</h2>
 
       {isDockerEnv && (
         <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-2 text-xs text-blue-400 mb-3">
@@ -392,11 +399,11 @@ export default function Settings() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* Left column: LLM config */}
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">LLM Provider</h3>
+          <h3 className="text-base font-semibold text-muted-foreground">LLM Provider</h3>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">Provider</Label>
+              <Label className="text-sm font-medium">Provider</Label>
               <Select value={provider} onValueChange={handleProviderChange}>
                 <SelectTrigger className="w-full h-8 text-xs">
                   <SelectValue placeholder="Select provider" />
@@ -408,13 +415,13 @@ export default function Settings() {
                 </SelectContent>
               </Select>
               {errors.provider && touched.has('llm_provider') && (
-                <p className="text-xs text-red-400">{errors.provider}</p>
+                <p className="text-sm text-red-400">{errors.provider}</p>
               )}
             </div>
 
             {provider === 'anthropic' && (
               <div className="space-y-1">
-                <Label className="text-xs">API Key</Label>
+                <Label className="text-sm font-medium">API Key</Label>
                 <Input
                   type="password"
                   placeholder="sk-ant-api03-..."
@@ -423,14 +430,14 @@ export default function Settings() {
                   className="h-8 text-xs"
                 />
                 {errors.apiKey && touched.has('anthropic_key') && (
-                  <p className="text-xs text-red-400">{errors.apiKey}</p>
+                  <p className="text-sm text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
 
             {showLlmApiKey && (
               <div className="space-y-1">
-                <Label className="text-xs">API Key</Label>
+                <Label className="text-sm font-medium">API Key</Label>
                 <Input
                   type={provider === 'ollama' ? 'text' : 'password'}
                   placeholder={defaults.keyPlaceholder}
@@ -440,7 +447,7 @@ export default function Settings() {
                   className="h-8 text-xs"
                 />
                 {errors.apiKey && touched.has('llm_api_key') && (
-                  <p className="text-xs text-red-400">{errors.apiKey}</p>
+                  <p className="text-sm text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
@@ -448,7 +455,7 @@ export default function Settings() {
 
           {showBaseUrl && (
             <div className="space-y-1">
-              <Label className="text-xs">Base URL</Label>
+              <Label className="text-sm font-medium">Base URL</Label>
               <Input
                 placeholder={defaults.baseUrl}
                 value={config.llm_base_url || ''}
@@ -456,7 +463,7 @@ export default function Settings() {
                 className="h-8 text-xs"
               />
               {errors.baseUrl && touched.has('llm_base_url') && (
-                <p className="text-xs text-red-400">{errors.baseUrl}</p>
+                <p className="text-sm text-red-400">{errors.baseUrl}</p>
               )}
             </div>
           )}
@@ -479,17 +486,63 @@ export default function Settings() {
               error={errors.deepModel && touched.has('deep_model') ? errors.deepModel : undefined}
             />
           </div>
+
+          {/* Concurrency & token limits */}
+          <div className="border-t border-border pt-2 space-y-1">
+            <h3 className="text-base font-semibold text-muted-foreground">Performance Limits</h3>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Max Concurrent</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  placeholder="10"
+                  value={config.max_concurrent || 10}
+                  onChange={(e) => updateField('max_concurrent', parseInt(e.target.value, 10) || 10)}
+                  className="h-8 text-xs"
+                />
+                <p className="text-sm text-muted-foreground">Parallel LLM calls</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Fast Max Tokens</Label>
+                <Input
+                  type="number"
+                  min={256}
+                  max={65536}
+                  placeholder="4096"
+                  value={config.fast_max_tokens || 4096}
+                  onChange={(e) => updateField('fast_max_tokens', parseInt(e.target.value, 10) || 4096)}
+                  className="h-8 text-xs"
+                />
+                <p className="text-sm text-muted-foreground">Fast model output cap</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Deep Max Tokens</Label>
+                <Input
+                  type="number"
+                  min={256}
+                  max={65536}
+                  placeholder="8192"
+                  value={config.deep_max_tokens || 8192}
+                  onChange={(e) => updateField('deep_max_tokens', parseInt(e.target.value, 10) || 8192)}
+                  className="h-8 text-xs"
+                />
+                <p className="text-sm text-muted-foreground">Deep model output cap</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right column: Connections */}
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Connections</h3>
+          <h3 className="text-base font-semibold text-muted-foreground">Connections</h3>
 
           {/* Memories */}
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label className="text-xs">Memories URL</Label>
+                <Label className="text-sm font-medium">Memories URL</Label>
                 <Input
                   placeholder="http://localhost:8900"
                   value={config.memories_url || ''}
@@ -497,11 +550,11 @@ export default function Settings() {
                   className="h-8 text-xs"
                 />
                 {errors.memoriesUrl && touched.has('memories_url') && (
-                  <p className="text-xs text-red-400">{errors.memoriesUrl}</p>
+                  <p className="text-sm text-red-400">{errors.memoriesUrl}</p>
                 )}
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Memories Key</Label>
+                <Label className="text-sm font-medium">Memories Key</Label>
                 <Input
                   type="password"
                   placeholder="(optional)"
@@ -519,7 +572,7 @@ export default function Settings() {
               {connectionStatus === 'unreachable' && (
                 <>
                   <Badge variant="destructive" className="text-xs">Unreachable</Badge>
-                  {connectionError && <span className="text-xs text-red-400">{connectionError}</span>}
+                  {connectionError && <span className="text-sm text-red-400">{connectionError}</span>}
                 </>
               )}
             </div>
@@ -528,7 +581,7 @@ export default function Settings() {
           <div className="border-t border-border pt-2 space-y-2">
             {/* GitHub */}
             <div className="space-y-1">
-              <Label className="text-xs">GitHub Token</Label>
+              <Label className="text-sm font-medium">GitHub Token</Label>
               <Input
                 type="password"
                 placeholder="ghp_... (optional)"
@@ -540,7 +593,7 @@ export default function Settings() {
 
             {/* Jira */}
             <div className="space-y-1">
-              <Label className="text-xs">Jira Base URL</Label>
+              <Label className="text-sm font-medium">Jira Base URL</Label>
               <Input
                 placeholder="https://your-org.atlassian.net"
                 value={config.jira_base_url || ''}
@@ -550,7 +603,7 @@ export default function Settings() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label className="text-xs">Jira Email</Label>
+                <Label className="text-sm font-medium">Jira Email</Label>
                 <Input
                   placeholder="user@company.com"
                   value={config.jira_email || ''}
@@ -559,7 +612,7 @@ export default function Settings() {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Jira Token</Label>
+                <Label className="text-sm font-medium">Jira Token</Label>
                 <Input
                   type="password"
                   placeholder="(optional)"
@@ -572,7 +625,7 @@ export default function Settings() {
 
             {/* Linear */}
             <div className="space-y-1">
-              <Label className="text-xs">Linear API Key</Label>
+              <Label className="text-sm font-medium">Linear API Key</Label>
               <Input
                 type="password"
                 placeholder="lin_api_..."
@@ -584,7 +637,7 @@ export default function Settings() {
 
             {/* Notion */}
             <div className="space-y-1">
-              <Label className="text-xs">Notion Token</Label>
+              <Label className="text-sm font-medium">Notion Token</Label>
               <Input
                 type="password"
                 placeholder="ntn_..."
@@ -596,7 +649,7 @@ export default function Settings() {
 
             {/* Slack */}
             <div className="space-y-1">
-              <Label className="text-xs">Slack Bot Token</Label>
+              <Label className="text-sm font-medium">Slack Bot Token</Label>
               <Input
                 type="password"
                 placeholder="xoxb-..."
