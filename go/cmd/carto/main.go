@@ -50,6 +50,10 @@ Environment variables:
 	root.PersistentFlags().String("log-file", "", "Append structured JSON audit events to this file")
 	// --profile selects the named config profile (multi-environment support).
 	root.PersistentFlags().String("profile", "", "Config profile to use (overrides CARTO_PROFILE env var)")
+	// --pretty forces human-readable output even when piped (inverse of --json).
+	root.PersistentFlags().Bool("pretty", false, "Force human-readable output even when piped")
+	// --yes skips confirmation prompts for automation and agent usage.
+	root.PersistentFlags().BoolP("yes", "y", false, "Skip confirmation prompts")
 
 	// ── Subcommands ────────────────────────────────────────────────────────
 	root.AddCommand(indexCmd())
