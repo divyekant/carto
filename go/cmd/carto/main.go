@@ -69,6 +69,8 @@ Environment variables:
 	root.AddCommand(doctorCmd())      // B2B: pre-flight environment diagnostics
 	root.AddCommand(versionCmd(version)) // structured version info (JSON-capable)
 	root.AddCommand(aboutCmd())          // product identity card and branding guide
+	root.AddCommand(completionsCmd())    // shell completion scripts (bash/zsh/fish/powershell)
+	root.AddCommand(initCmd())           // configuration wizard (interactive + --non-interactive)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
