@@ -63,7 +63,7 @@ func runAbout(cmd *cobra.Command, _ []string) error {
 		ProjectURL:  ProjectURL,
 	}
 
-	writeOutput(cmd, data, func() {
+	writeEnvelopeHuman(cmd, data, nil, func() {
 		// ── Header ──────────────────────────────────────────────────────────
 		fmt.Printf("\n  %s%s%s%s\n", bold, gold, AppName, reset)
 		fmt.Printf("  %s\n", Tagline)

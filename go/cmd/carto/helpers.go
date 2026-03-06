@@ -68,39 +68,6 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// writeOutput renders data as JSON (if --json flag is set) or invokes
-// the human-readable callback. It traverses up to the root command to find
-// the persistent --json flag set at any level.
-func writeOutput(cmd *cobra.Command, data any, humanFn func()) {
-	jsonMode := false
-	// Walk up the command chain to find the --json persistent flag.
-	c := cmd
-	for c != nil {
-		if f := c.PersistentFlags().Lookup("json"); f != nil {
-			if v, err := c.PersistentFlags().GetBool("json"); err == nil && v {
-				jsonMode = true
-				break
-			}
-		}
-		// Also check non-persistent flags in case the flag was defined locally.
-		if f := c.Flags().Lookup("json"); f != nil {
-			if v, err := c.Flags().GetBool("json"); err == nil && v {
-				jsonMode = true
-				break
-			}
-		}
-		c = c.Parent()
-	}
-
-	if jsonMode {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(data) //nolint:errcheck
-		return
-	}
-	humanFn()
-}
-
 // printError writes a formatted error line to stderr with ANSI colour.
 // Use this for user-visible errors; the returned error is for cobra.
 func printError(format string, args ...any) {

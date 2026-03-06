@@ -51,7 +51,7 @@ func runModules(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	writeOutput(cmd, modules, func() {
+	writeEnvelopeHuman(cmd, modules, nil, func() {
 		fmt.Printf("%s%sDetected modules in %s%s\n\n", bold, gold, absPath, reset)
 
 		if len(modules) == 0 {

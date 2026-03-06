@@ -47,7 +47,7 @@ The --json flag emits a machine-readable JSON object suitable for CI pipelines:
 				Arch:      runtime.GOARCH,
 			}
 
-			writeOutput(cmd, info, func() {
+			writeEnvelopeHuman(cmd, info, nil, func() {
 				fmt.Printf("%s%scarto%s %s\n", bold, gold, reset, ver)
 				fmt.Printf("  go:   %s\n", info.GoVersion)
 				fmt.Printf("  os:   %s/%s\n", info.OS, info.Arch)

@@ -44,7 +44,7 @@ func runSourcesList(cmd *cobra.Command, args []string) error {
 	}
 
 	if srcCfg == nil || len(srcCfg.Sources) == 0 {
-		writeOutput(cmd, map[string]interface{}{"sources": map[string]interface{}{}}, func() {
+		writeEnvelopeHuman(cmd, map[string]interface{}{"sources": map[string]interface{}{}}, nil, func() {
 			fmt.Println("No sources configured.")
 		})
 		return nil
@@ -63,7 +63,7 @@ func runSourcesList(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	writeOutput(cmd, details, func() {
+	writeEnvelopeHuman(cmd, details, nil, func() {
 		fmt.Printf("%s%sSources for %s%s\n\n", bold, gold, args[0], reset)
 		for name, entry := range srcCfg.Sources {
 			fmt.Printf("  %s%s%s\n", bold, name, reset)
@@ -134,7 +134,7 @@ func runSourcesSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save sources: %w", err)
 	}
 
-	writeOutput(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "updated"}, func() {
+	writeEnvelopeHuman(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "updated"}, nil, func() {
 		fmt.Printf("%s✓%s Source %q updated for project %q\n", green, reset, sourceType, projectName)
 	})
 	return nil
@@ -176,7 +176,7 @@ func runSourcesRm(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save sources: %w", err)
 	}
 
-	writeOutput(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "removed"}, func() {
+	writeEnvelopeHuman(cmd, map[string]string{"project": projectName, "source": sourceType, "status": "removed"}, nil, func() {
 		fmt.Printf("%s✓%s Source %q removed from project %q\n", green, reset, sourceType, projectName)
 	})
 	return nil

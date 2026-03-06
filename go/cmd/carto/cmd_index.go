@@ -234,10 +234,10 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 		mode = "changed"
 	}
 
-	writeOutput(cmd, map[string]interface{}{
+	writeEnvelopeHuman(cmd, map[string]interface{}{
 		"mode":     mode,
 		"projects": projects,
-	}, func() {
+	}, nil, func() {
 		if len(projects) == 0 {
 			if changedOnly {
 				fmt.Println("No projects with changes found.")

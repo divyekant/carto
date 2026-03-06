@@ -42,7 +42,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("retrieve by tier: %w", err)
 		}
 
-		writeOutput(cmd, results, func() {
+		writeEnvelopeHuman(cmd, results, nil, func() {
 			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, gold, project, tier, reset)
 
 			for layer, entries := range results {
@@ -70,7 +70,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("search: %w", err)
 	}
 
-	writeOutput(cmd, results, func() {
+	writeEnvelopeHuman(cmd, results, nil, func() {
 		fmt.Printf("%s%sSearch results for: %q%s (k=%d)\n\n", bold, gold, query, reset, count)
 
 		if len(results) == 0 {

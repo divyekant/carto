@@ -73,13 +73,13 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		if !ok {
 			return fmt.Errorf("unknown config key: %q (run 'carto config get' for a full list)", key)
 		}
-		writeOutput(cmd, map[string]string{key: val}, func() {
+		writeEnvelopeHuman(cmd, map[string]string{key: val}, nil, func() {
 			fmt.Printf("%s: %s\n", key, val)
 		})
 		return nil
 	}
 
-	writeOutput(cmd, configMap, func() {
+	writeEnvelopeHuman(cmd, configMap, nil, func() {
 		fmt.Printf("%s%sConfiguration%s  profile: %s\n\n", bold, gold, reset, profile)
 		if config.ConfigPath != "" {
 			fmt.Printf("  %sfile:%s %s\n\n", gold, reset, config.ConfigPath)
@@ -199,7 +199,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	writeOutput(cmd, map[string]string{key: value, "status": "saved"}, func() {
+	writeEnvelopeHuman(cmd, map[string]string{key: value, "status": "saved"}, nil, func() {
 		fmt.Printf("%s✓%s Set %s = %s\n", green, reset, key, value)
 	})
 	logAuditEvent(cmd, "ok", "", map[string]any{"key": key})
@@ -233,7 +233,7 @@ func runConfigValidate(cmd *cobra.Command, _ []string) error {
 	}
 
 	if err == nil {
-		writeOutput(cmd, result{Profile: profile, Valid: true}, func() {
+		writeEnvelopeHuman(cmd, result{Profile: profile, Valid: true}, nil, func() {
 			fmt.Printf("%s✓%s Configuration is valid (profile: %s)\n", green, reset, profile)
 		})
 		logAuditEvent(cmd, "ok", "", map[string]any{"profile": profile})
@@ -247,7 +247,7 @@ func runConfigValidate(cmd *cobra.Command, _ []string) error {
 		errs = []string{err.Error()}
 	}
 
-	writeOutput(cmd, result{Profile: profile, Valid: false, Errors: errs}, func() {
+	writeEnvelopeHuman(cmd, result{Profile: profile, Valid: false, Errors: errs}, nil, func() {
 		fmt.Printf("%s✗%s Configuration invalid (profile: %s)\n\n", red, reset, profile)
 		for _, e := range errs {
 			fmt.Printf("  • %s\n", e)
@@ -295,7 +295,7 @@ func runConfigPath(cmd *cobra.Command, _ []string) error {
 		FileExists:  fileErr == nil,
 	}
 
-	writeOutput(cmd, out, func() {
+	writeEnvelopeHuman(cmd, out, nil, func() {
 		fmt.Printf("%s%sConfig Paths%s\n\n", bold, gold, reset)
 		dirStatus := checkMark(out.DirExists)
 		fileStatus := checkMark(out.FileExists)

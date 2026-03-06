@@ -72,7 +72,7 @@ func runProjectsList(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	writeOutput(cmd, projects, func() {
+	writeEnvelopeHuman(cmd, projects, nil, func() {
 		if len(projects) == 0 {
 			fmt.Println("No indexed projects found.")
 			return
@@ -149,7 +149,7 @@ func runProjectsShow(cmd *cobra.Command, args []string) error {
 		Sources:   sourceNames,
 	}
 
-	writeOutput(cmd, data, func() {
+	writeEnvelopeHuman(cmd, data, nil, func() {
 		fmt.Printf("%s%sProject: %s%s\n\n", bold, gold, data.Name, reset)
 		fmt.Printf("  %sPath:%s        %s\n", gold, reset, data.Path)
 		fmt.Printf("  %sFiles:%s       %d\n", gold, reset, data.Files)
@@ -184,6 +184,11 @@ func runProjectsDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("project %q has no .carto directory", name)
 	}
 
+	if !confirmAction(cmd, fmt.Sprintf("Delete project %q .carto directory?", name)) {
+		fmt.Println("Aborted.")
+		return nil
+	}
+
 	if err := os.RemoveAll(cartoDir); err != nil {
 		return fmt.Errorf("delete .carto: %w", err)
 	}
@@ -193,7 +198,7 @@ func runProjectsDelete(cmd *cobra.Command, args []string) error {
 		Deleted bool   `json:"deleted"`
 	}
 
-	writeOutput(cmd, deleteResult{Name: name, Deleted: true}, func() {
+	writeEnvelopeHuman(cmd, deleteResult{Name: name, Deleted: true}, nil, func() {
 		fmt.Printf("%s✓%s Deleted .carto directory for project %q\n", green, reset, name)
 	})
 	return nil

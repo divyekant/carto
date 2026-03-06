@@ -31,7 +31,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if mf.IsEmpty() {
-		writeOutput(cmd, map[string]interface{}{"indexed": false, "path": absPath}, func() {
+		writeEnvelopeHuman(cmd, map[string]interface{}{"indexed": false, "path": absPath}, nil, func() {
 			fmt.Printf("%s%sIndex status for %s%s\n\n", bold, gold, absPath, reset)
 			fmt.Printf("  %sNo index found.%s Run %scarto index %s%s to create one.\n", amber, reset, bold, absPath, reset)
 		})
@@ -63,7 +63,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		IndexedAt: mf.IndexedAt.Format(time.RFC3339),
 	}
 
-	writeOutput(cmd, data, func() {
+	writeEnvelopeHuman(cmd, data, nil, func() {
 		fmt.Printf("%s%sIndex status for %s%s\n\n", bold, gold, absPath, reset)
 		fmt.Printf("  %sProject:%s     %s\n", gold, reset, data.Project)
 		fmt.Printf("  %sLast indexed:%s %s\n", gold, reset, data.IndexedAt)

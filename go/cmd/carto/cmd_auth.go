@@ -97,7 +97,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Creds:    rows,
 	}
 
-	writeOutput(cmd, out, func() {
+	writeEnvelopeHuman(cmd, out, nil, func() {
 		fmt.Printf("%s%sAuth Status%s  profile: %s  provider: %s\n\n",
 			bold, gold, reset, profile, cfg.LLMProvider)
 		fmt.Printf("  %-20s %-8s %-25s %s\n", "CREDENTIAL", "STATUS", "MASKED VALUE", "NOTE")
@@ -194,11 +194,11 @@ func runAuthSetKey(cmd *cobra.Command, args []string) error {
 	}
 
 	masked := config.MaskSecret(key)
-	writeOutput(cmd, map[string]string{
+	writeEnvelopeHuman(cmd, map[string]string{
 		"provider": provider,
 		"status":   "saved",
 		"masked":   masked,
-	}, func() {
+	}, nil, func() {
 		fmt.Printf("%s✓%s Stored %s key: %s\n", green, reset, provider, masked)
 	})
 
@@ -288,7 +288,7 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 
 	if err != nil {
 		res := result{Provider: provider, Status: "unreachable", Latency: latency, Error: err.Error()}
-		writeOutput(cmd, res, func() {
+		writeEnvelopeHuman(cmd, res, nil, func() {
 			fmt.Printf("%s✗%s %s unreachable: %v\n", red, reset, provider, err)
 		})
 		logAuditEvent(cmd, "error", err.Error(), nil)
@@ -299,13 +299,13 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusPartialContent:
 		res := result{Provider: provider, Status: "reachable", Latency: latency}
-		writeOutput(cmd, res, func() {
+		writeEnvelopeHuman(cmd, res, nil, func() {
 			fmt.Printf("%s✓%s %s API key valid — %sms latency\n", green, reset, provider, latency)
 		})
 		logAuditEvent(cmd, "ok", "", map[string]any{"provider": provider, "latency_ms": latency})
 	case http.StatusUnauthorized, http.StatusForbidden:
 		res := result{Provider: provider, Status: "auth_failed", Latency: latency, Error: resp.Status}
-		writeOutput(cmd, res, func() {
+		writeEnvelopeHuman(cmd, res, nil, func() {
 			fmt.Printf("%s✗%s %s authentication failed (%s)\n", red, reset, provider, resp.Status)
 			fmt.Printf("   Tip: Re-run %scarto auth set-key %s <new-key>%s\n", bold, provider, reset)
 		})
@@ -314,7 +314,7 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 	default:
 		res := result{Provider: provider, Status: "reachable", Latency: latency,
 			Error: fmt.Sprintf("unexpected status %d", resp.StatusCode)}
-		writeOutput(cmd, res, func() {
+		writeEnvelopeHuman(cmd, res, nil, func() {
 			fmt.Printf("%s⚠%s %s responded %d — may still work\n", amber, reset, provider, resp.StatusCode)
 		})
 		logAuditEvent(cmd, "ok", fmt.Sprintf("http_%d", resp.StatusCode), nil)

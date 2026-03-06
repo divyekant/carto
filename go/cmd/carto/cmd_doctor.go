@@ -315,7 +315,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		Warnings: warnings,
 	}
 
-	writeOutput(cmd, out, func() {
+	writeEnvelopeHuman(cmd, out, nil, func() {
 		fmt.Printf("%s%sCarto Doctor%s  profile: %s\n\n", bold, gold, reset, profile)
 		for _, c := range checks {
 			fmt.Printf("  %s %-22s %s\n", c.icon(), c.Name, c.Message)
