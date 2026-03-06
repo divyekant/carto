@@ -71,6 +71,10 @@ Environment variables:
 	root.AddCommand(aboutCmd())          // product identity card and branding guide
 	root.AddCommand(completionsCmd())    // shell completion scripts (bash/zsh/fish/powershell)
 	root.AddCommand(initCmd())           // configuration wizard (interactive + --non-interactive)
+	root.AddCommand(exportCmd())         // export index data as NDJSON
+	root.AddCommand(importCmd())         // import NDJSON index data
+	root.AddCommand(logsCmd())           // query and tail audit log
+	root.AddCommand(upgradeCmd())        // check for and install new versions
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
