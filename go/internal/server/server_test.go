@@ -16,6 +16,82 @@ import (
 	"github.com/divyekant/carto/internal/storage"
 )
 
+// =========================================================================
+// /healthz tests
+// =========================================================================
+
+func TestHealthzEndpoint_ReturnsOK(t *testing.T) {
+	// /healthz must return 200 with status:ok whenever the process is alive.
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 from /healthz, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode /healthz response: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("expected status 'ok', got %v", resp["status"])
+	}
+}
+
+func TestHealthzEndpoint_BypassesAuth(t *testing.T) {
+	// /healthz is a liveness probe — container orchestrators must reach it
+	// without credentials. The bearerAuth middleware passes all non-/api/ paths.
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{ServerToken: "super-secret"}, memoriesClient, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	// Deliberately omit Authorization header.
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("/healthz must bypass auth, got %d", w.Code)
+	}
+}
+
+func TestHealthzEndpoint_MemoriesDownStillOK(t *testing.T) {
+	// /healthz is a liveness probe only — it must return 200 even when the
+	// Memories dependency is unreachable. Readiness checking lives in
+	// /api/health/ready.
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("/healthz should return 200 even when Memories is down, got %d", w.Code)
+	}
+}
+
+func TestHealthzEndpoint_ResponseIsJSON(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("expected application/json Content-Type, got %q", ct)
+	}
+}
+
+// =========================================================================
+// Original health endpoint tests
+// =========================================================================
+
 func TestHealthEndpoint(t *testing.T) {
 	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
