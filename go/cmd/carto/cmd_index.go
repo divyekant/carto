@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -161,6 +163,10 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 // runIndexAll lists projects that would be indexed when --all or --changed is used.
 // It does NOT run the pipeline (that requires LLM keys); it only enumerates projects.
+//
+// When changedOnly is true, a project is included only if any of its tracked
+// source files (excluding .carto/) has been modified after the manifest's
+// IndexedAt timestamp. This avoids unnecessary LLM calls for unmodified codebases.
 func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 	projectsDir := os.Getenv("PROJECTS_DIR")
 	if projectsDir == "" {
@@ -178,6 +184,7 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 		Name      string `json:"name"`
 		Path      string `json:"path"`
 		IndexedAt string `json:"indexed_at"`
+		Changed   bool   `json:"changed"`
 	}
 
 	var projects []projectEntry
@@ -191,23 +198,34 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 			continue
 		}
 
-		// TODO: For --changed, detect actual modifications (e.g. compare
-		// file hashes against the manifest). For now we list all projects
-		// regardless of the changedOnly flag.
-
 		name := mf.Project
 		if name == "" {
 			name = entry.Name()
+		}
+
+		// For --changed, skip projects with no modifications since last index.
+		hasChanges := true
+		if changedOnly && !mf.IndexedAt.IsZero() {
+			hasChanges = projectHasChanges(projectPath, mf.IndexedAt)
+			if !hasChanges {
+				verboseLog(cmd, "skipping %q — no changes since %s", name, mf.IndexedAt.Format(time.RFC3339))
+				continue
+			}
 		}
 
 		projects = append(projects, projectEntry{
 			Name:      name,
 			Path:      projectPath,
 			IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+			Changed:   hasChanges,
 		})
 
 		if !quiet {
-			fmt.Printf("  %s%s%s\n", bold, name, reset)
+			marker := ""
+			if changedOnly {
+				marker = " " + yellow + "(changed)" + reset
+			}
+			fmt.Printf("  %s%s%s%s\n", bold, name, reset, marker)
 		}
 	}
 
@@ -221,10 +239,46 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 		"projects": projects,
 	}, func() {
 		if len(projects) == 0 {
-			fmt.Println("No indexed projects found.")
+			if changedOnly {
+				fmt.Println("No projects with changes found.")
+			} else {
+				fmt.Println("No indexed projects found.")
+			}
 			return
 		}
 		fmt.Printf("\n%s%sWould re-index %d project(s) (mode: %s)%s\n", bold, cyan, len(projects), mode, reset)
 	})
 	return nil
+}
+
+// projectHasChanges reports whether any non-.carto/ file in projectPath has
+// been modified after indexedAt. It skips the .carto directory to avoid
+// treating manifest updates as source changes.
+//
+// The comparison uses file mtime as a fast proxy. For large repositories a
+// full hash comparison would be more accurate but significantly slower.
+func projectHasChanges(projectPath string, indexedAt time.Time) bool {
+	changed := false
+	_ = filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		// Exclude the .carto/ metadata directory from change detection.
+		if d.IsDir() && strings.HasSuffix(d.Name(), ".carto") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if info.ModTime().After(indexedAt) {
+			changed = true
+			return fs.SkipAll // short-circuit once one changed file found
+		}
+		return nil
+	})
+	return changed
 }
