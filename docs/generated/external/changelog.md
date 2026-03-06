@@ -1,7 +1,7 @@
 ---
 type: changelog
 audience: external
-generated: 2026-02-28
+generated: 2026-03-06
 hermes-version: 1.0.0
 ---
 
@@ -10,6 +10,34 @@ hermes-version: 1.0.0
 All notable changes to Carto are documented here.
 
 This project follows [Semantic Versioning](https://semver.org/) and the [Keep a Changelog](https://keepachangelog.com/) format.
+
+---
+
+## [1.2.0] - 2026-03-06
+
+### Added
+
+- **6 new commands: init, completions, export, import, logs, upgrade.** `carto init` provides an interactive (and `--non-interactive`) configuration wizard. `carto completions` generates shell completion scripts for bash, zsh, fish, and powershell. `carto export` streams index data as NDJSON for backup and migration. `carto import` ingests NDJSON from stdin with `add` or `replace` strategies. `carto logs` queries and tails the structured audit log with filtering by command and result. `carto upgrade` checks GitHub for newer versions and offers to install them.
+
+- **JSON envelope contract for all commands.** Every command now returns structured JSON when piped or when `--json` is passed: `{"ok": true, "data": {...}}` on success and `{"ok": false, "error": "message", "code": "ERROR_CODE"}` on failure. Five error codes map to specific exit codes: `GENERAL_ERROR` (1), `NOT_FOUND` (2), `CONFIG_ERROR` (3), `CONNECTION_ERROR` (4), `AUTH_FAILURE` (5).
+
+- **TTY auto-detection for smart output formatting.** Terminal stdout produces human-readable colored output; piped stdout automatically emits JSON without requiring `--json`. The `--pretty` flag overrides to human-readable even when piped.
+
+- **`--pretty` and `--yes`/`-y` global flags.** `--pretty` forces human-readable output in any context. `--yes` skips all confirmation prompts for automation and agent usage.
+
+- **Shell completion scripts for bash, zsh, fish, and powershell.** Run `carto completions <shell>` to generate completion scripts that enable tab-completion of commands, subcommands, and flags.
+
+### Changed
+
+- **All CLI output now uses the gold brand palette.** Terminal output across all commands uses a consistent branded color scheme.
+
+- **All commands wrapped in JSON envelope when piped.** Previously only `--json` triggered structured output. Now piping any command to another process automatically switches to the JSON envelope format.
+
+- **`projects delete` now requires confirmation.** Deleting a project prompts for yes/no confirmation to prevent accidental data loss. Use `--yes` to skip the prompt in automated environments.
+
+### Fixed
+
+- **4 pre-existing test failures in JSON output tests.** Fixed incorrect assertions in output formatting tests that were checking for the old plain-text format instead of the new envelope structure.
 
 ---
 

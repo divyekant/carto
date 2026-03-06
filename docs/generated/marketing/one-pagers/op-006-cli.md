@@ -2,43 +2,49 @@
 id: op-006
 type: one-pager
 audience: marketing
-topic: Command-Line Interface
+topic: CLI & Agent Usability
 status: draft
-generated: 2026-02-28
+generated: 2026-03-06
 source-tier: carto
 hermes-version: 1.0.0
 ---
 
-# Carto CLI: Codebase Intelligence From Your Terminal
+# Carto CLI: The First Agent-Native Interface for Codebase Intelligence
 
 ## The Problem
 
-Developers don't want another dashboard. They want tools that fit the way they already work — in the terminal, in scripts, in CI pipelines. Most code analysis tools force you into a browser, breaking your flow every time you need context.
+AI agents are the fastest-growing consumer of developer CLIs. Claude, Cursor, and Copilot run terminal commands millions of times a day on behalf of developers. But every CLI they encounter was designed for human eyes -- colored text, progress spinners, unpredictable error messages. Agents have to scrape output, guess at formats, and fail silently when things go wrong.
+
+Developers shouldn't have to choose between a CLI that works for their AI assistants and one that works for them.
 
 ## The Solution
 
-Carto ships as a single binary with 9 purpose-built commands that give you complete control over codebase intelligence from the command line. Index a project, query its context, generate skill files for AI assistants — all without leaving your terminal.
+Carto's CLI auto-detects who is calling it and adapts. Run a command in your terminal and you get gold-branded colored output with progress spinners. Pipe that same command through an AI agent and it receives clean, structured JSON with typed error codes -- automatically. No flags. No configuration.
 
-## Key Benefits
+This is not a feature toggle. It is a fundamental design principle: every command, every output, every error is built to serve both humans and machines from the ground up.
 
-**Ship it anywhere.** One binary, no dependencies. Works on macOS, Linux, and in containers. Hand it to a new developer and they're productive in minutes.
+## Why It Matters
 
-**Automate everything.** Every command supports `--json` output. Feed Carto into `jq`, pipe results into downstream tools, or embed it in shell scripts. It was built for automation from day one.
+**For AI-assisted teams:** Your agents can drive Carto without custom parsing, wrapper scripts, or fragile regex. Index a codebase, query its intelligence, export data -- all through structured commands that agents understand natively.
 
-**Run it in CI/CD.** Meaningful exit codes, headless operation, and machine-readable output mean Carto drops into any pipeline. Keep your codebase intelligence fresh on every push.
+**For developers:** 18 commands cover the complete workflow. An interactive setup wizard gets you running in seconds. Shell completions eliminate typos. A built-in upgrade command keeps your installation current.
 
-**Incremental speed.** Re-indexing only touches changed files. Run it on every commit without slowing down your workflow.
+**For platform teams:** Typed error codes and structured audit logging give you the observability and compliance controls that enterprise environments demand. Export and import make codebase intelligence portable across machines, teams, and environments.
 
-**Full workflow coverage.** Nine commands handle scanning, indexing, querying, skill file generation, and project management. No feature is locked behind a GUI.
+**For existing users:** Zero breaking changes. Every script, pipeline, and workflow you have today continues working exactly as before.
 
-## How It Works
+## Key Capabilities
 
-Install the binary. Point it at your codebase. Run `carto index`. That's it — your codebase intelligence is built and ready to query. Use `carto query` to retrieve structured context, or `carto generate` to produce skill files that supercharge your AI coding assistants.
-
-## Who It's For
-
-Developers who live in the terminal. DevOps engineers building intelligent pipelines. Platform teams automating code analysis across dozens of repositories.
+| Capability | What It Delivers |
+|---|---|
+| **Auto-adaptive output** | JSON for agents, rich terminal UI for humans -- detected automatically |
+| **18 CLI commands** | Full workflow coverage: index, query, export, import, upgrade, audit, and more |
+| **Interactive setup** | `carto init` wizard configures your project in seconds |
+| **Shell completions** | Tab-complete every command and flag in bash, zsh, fish, and PowerShell |
+| **Data portability** | Export/import codebase indexes as NDJSON -- back up, share, or migrate freely |
+| **Structured audit log** | Every operation logged with queryable structured entries |
+| **Self-update** | `carto upgrade` checks for and installs the latest version |
 
 ## Get Started
 
-Download the Carto binary, set your API key, and run your first index in under a minute. Visit the Quick Start guide to begin.
+Install the Carto binary. Run `carto init` to configure your first project. Run `carto index` to build your codebase intelligence. Your AI assistants -- and your team -- are ready to go.

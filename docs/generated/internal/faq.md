@@ -2,14 +2,14 @@
 type: faq
 audience: internal
 status: draft
-generated: 2026-02-28
+generated: 2026-03-06
 source-tier: carto
 hermes-version: 1.0.0
 ---
 
 # Carto FAQ
 
-Frequently asked questions organized by topic. Answers are specific to Carto v1.0.0.
+Frequently asked questions organized by topic. Updated for Carto v1.2.0.
 
 ---
 
@@ -156,7 +156,7 @@ The REST API supports: project CRUD (`/api/projects`), source management (`/api/
 
 ### What are the available CLI commands?
 
-The CLI exposes 9 commands: `index`, `query`, `modules`, `patterns`, `status`, `serve`, `projects`, `sources`, and `config`. All commands support `--json` for machine-readable output.
+The CLI exposes 18 commands organized in four groups: core pipeline (`index`, `query`, `modules`, `patterns`, `status`), infrastructure (`serve`, `projects`, `sources`, `config`, `auth`, `doctor`), setup and lifecycle (`init`, `completions`, `version`, `about`, `upgrade`), and data portability (`export`, `import`, `logs`). All commands support the JSON envelope contract with TTY auto-detection.
 
 ---
 
@@ -177,3 +177,43 @@ Yes. The project includes a `docker-compose.yml` that runs both Carto and a Memo
 ### Does the Docker setup include the Web UI?
 
 Yes. The Docker image includes the embedded React SPA. When running `carto serve` inside the container (or if the compose file starts the server), the Web UI is accessible on the exposed port.
+
+---
+
+## CLI & Agent Usability
+
+### What is the JSON envelope contract and how does it work?
+
+As of v1.2.0, all CLI commands wrap their output in a standard JSON envelope: `{"ok": true, "data": ...}` for success and `{"ok": false, "error": "...", "code": "..."}` for errors. This matches the Memories CLI convention. Success envelopes go to stdout; error envelopes go to stderr. The `code` field contains a machine-readable error code (`GENERAL_ERROR`, `NOT_FOUND`, `CONFIG_ERROR`, `CONNECTION_ERROR`, `AUTH_FAILURE`) and the process exit code maps to the error category (0-5). Scripts should parse the envelope rather than raw output, and use both the `code` field and exit code for programmatic error handling.
+
+### How does TTY auto-detection work? Do I need to pass `--json` in CI pipelines?
+
+No. When stdout is not a terminal (e.g., piped to another program, redirected to a file, or captured by a subprocess), the CLI automatically emits JSON envelope output without needing `--json`. This means CI pipelines and AI agents get structured JSON by default. Use `--json` only when you explicitly want JSON on a terminal. Use `--pretty` to force human-readable colored output even when piped (e.g., for logging pipelines that want readable text). If both `--json` and `--pretty` are set, `--pretty` wins.
+
+### What is the `--yes` flag and when do I need it?
+
+The `--yes` (or `-y`) global flag skips interactive confirmation prompts. It is required for destructive operations when running in non-interactive contexts (CI, agents, piped output). Without `--yes`, the `confirmAction()` function returns false in JSON/non-TTY mode, silently cancelling the operation. Commands that require confirmation: `projects delete`, `import --strategy replace`, and `upgrade` (when an update is available). Always pass `--yes` when automating destructive operations.
+
+### How do I use the new `carto init` command to set up Carto in a CI pipeline?
+
+Use `--non-interactive` mode with all required flags:
+```bash
+carto init --non-interactive \
+  --llm-provider anthropic \
+  --api-key "$ANTHROPIC_KEY" \
+  --memories-url "http://memories:8900" \
+  --projects-dir "/workspace/projects"
+```
+The `--api-key` flag is required in non-interactive mode. Other flags are optional and fall back to environment variables or defaults. The command writes the config file and emits an envelope with the config path, provider, and Memories URL.
+
+### How do I back up and transfer a project's index between environments?
+
+Use the `export` and `import` commands:
+```bash
+# Export from source environment
+carto export --project myapp > myapp.ndjson
+
+# Transfer the file to the target environment, then import
+cat myapp.ndjson | carto import --project myapp --strategy replace --yes
+```
+Use `--layer` on export to back up only a specific layer (atoms, wiring, zones, blueprint, patterns). Use `--strategy add` (the default) on import to append without deleting existing data. Use `--strategy replace` to replace the entire index for that project (requires `--yes` in non-interactive contexts).

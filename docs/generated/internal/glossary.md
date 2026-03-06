@@ -2,7 +2,7 @@
 type: glossary
 audience: internal
 status: draft
-generated: 2026-02-28
+generated: 2026-03-06
 source-tier: carto
 hermes-version: 1.0.0
 ---
@@ -51,6 +51,16 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 
 ---
 
+### cliError
+
+**Definition:** A structured error type defined in `errors.go` that carries a human-readable message (`msg`), a machine-readable error code (`code`), and a process exit code (`exit`). All CLI errors are either created as `cliError` instances or classified into one via `toCliError()`.
+
+**Context:** Constructor functions create typed errors: `newConnectionError()`, `newAuthError()`, `newNotFoundError()`, `newConfigError()`. The `toCliError()` function wraps any untyped error as `GENERAL_ERROR` with exit code 1. Used by the envelope system and `runWithEnvelope()`.
+
+**Not to be confused with:** Standard Go `error` interface. `cliError` is a Carto-specific wrapper that adds error codes and exit codes on top of the basic error string.
+
+---
+
 ### Chunk
 
 **Definition:** A discrete segment of source code extracted by the chunker, typically corresponding to a function, method, class, or logical block as identified by Tree-sitter AST parsing.
@@ -68,6 +78,26 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 **Context:** Written to the project root after the Skill Files phase. Content between `<!-- BEGIN CARTO INDEX -->` / `<!-- END CARTO INDEX -->` markers is managed by Carto; content outside is preserved.
 
 **Also known as:** Skill file (when referring generically alongside .cursorrules).
+
+---
+
+### Error Code
+
+**Definition:** A machine-readable string that classifies the type of CLI error. Appears in the `code` field of JSON error envelopes. The five error codes are: `GENERAL_ERROR` (unhandled), `NOT_FOUND` (resource missing), `CONFIG_ERROR` (invalid/missing config), `CONNECTION_ERROR` (unreachable service), and `AUTH_FAILURE` (bad/missing API key).
+
+**Context:** Defined as constants in `errors.go`. Each error code maps to a corresponding exit code (1-5). Used by agents and scripts for programmatic error classification -- more specific than exit codes alone.
+
+**Not to be confused with:** Exit codes (numeric process return values). Error codes are string identifiers in the JSON envelope; exit codes are integers returned to the shell.
+
+---
+
+### Exit Code
+
+**Definition:** A numeric value (0-5) returned by the Carto CLI process to indicate the outcome of a command. Exit code 0 means success. Non-zero codes indicate specific failure categories.
+
+**Context:** Defined in `helpers.go` and `errors.go`. The mapping is: 0 = success, 1 = general error, 2 = not found, 3 = config error, 4 = connection error, 5 = auth failure. Exit codes are set by `runWithEnvelope()` or by direct `os.Exit()` calls. Shell scripts can branch on `$?` to handle different failure categories.
+
+**Not to be confused with:** Error codes (string identifiers in JSON envelopes). Exit codes are for the shell; error codes are for JSON consumers.
 
 ---
 
@@ -95,11 +125,31 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 
 ---
 
+### Gold Brand Palette
+
+**Definition:** The Carto CLI's visual identity color scheme, consisting of five named colors used across all terminal output: Brand Gold (#d4af37) for primary accents, headers, and active states; Stone (#78716c) for de-emphasis and neutral text; Amber (#F59E0B) for warnings; Rose (#F43F5E) for errors and destructive actions; and Emerald (#10B981) for success indicators.
+
+**Context:** Defined in `branding.go` (brand constants) and `helpers.go` (ANSI escape codes). The CLI maps these hex colors to the closest ANSI equivalents: `\033[33m]` for gold, `\033[38;5;249m]` for stone, `\033[38;5;214m]` for amber, `\033[31m]` for red, `\033[32m]` for green. The palette replaced the earlier indigo/cyan color scheme in v1.2.0 and applies to all human-mode output.
+
+**Not to be confused with:** The Web UI's Tailwind CSS color palette, which can render the exact hex values. Terminal ANSI codes are approximations.
+
+---
+
 ### History
 
 **Definition:** Git history data extracted for each file, including commit frequency, recent changes, and author information. History forms layer 1b of the 7-layer context graph.
 
 **Context:** Produced by the `history` package during the History+Signals phase (phase 3). Provides temporal context -- which files change often, who works on what, and how the codebase evolves.
+
+---
+
+### JSON Envelope
+
+**Definition:** The standard output format for all Carto CLI commands in JSON mode. A success envelope is `{"ok": true, "data": <payload>}` written to stdout. An error envelope is `{"ok": false, "error": "<message>", "code": "<ERROR_CODE>"}` written to stderr. This contract matches the Memories CLI convention.
+
+**Context:** Implemented in `output.go` via `writeEnvelope()` and `writeEnvelopeHuman()`. JSON mode is triggered by the `--json` flag, by TTY auto-detection (non-terminal stdout), or by the `runWithEnvelope()` command runner. The envelope provides a consistent parsing contract for CI pipelines, AI agents, and scripts -- consumers check the `ok` field rather than parsing command-specific output formats.
+
+**Not to be confused with:** Raw NDJSON output from `carto export` (which streams individual records, not envelopes). The `--json` flag on `export` switches from raw NDJSON to envelope mode with a summary.
 
 ---
 
@@ -131,6 +181,16 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 
 ---
 
+### NDJSON
+
+**Definition:** Newline-Delimited JSON. A text format where each line is a complete, self-contained JSON object. Used by Carto for streaming data in the `export` command, the audit log file, and the `import` command's input format.
+
+**Context:** The `export` command streams index data as NDJSON (one memory record per line) for piping to files or other tools. The `import` command reads NDJSON from stdin. The audit log (`CARTO_AUDIT_LOG`) stores one JSON event per line. Each NDJSON line is independently parseable, making the format suitable for streaming, appending, and line-by-line processing with tools like `jq`.
+
+**Not to be confused with:** JSON arrays (`[{...}, {...}]`) or the JSON envelope format (`{"ok": true, "data": ...}`). NDJSON has no wrapping structure -- each line stands alone.
+
+---
+
 ### Module
 
 **Definition:** A project boundary detected by the scanner based on the presence of manifest files (e.g., `go.mod`, `package.json`, `Cargo.toml`). Each module represents a self-contained unit within a larger codebase.
@@ -146,6 +206,16 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 **Context:** Identified by the `analyzer` package and surfaced via the `patterns` package. Examples: "dependency injection via interfaces," "event-driven architecture," "repository pattern." Viewable via `carto patterns`.
 
 **Not to be confused with:** The `patterns` package (which generates skill files, not just pattern lists).
+
+---
+
+### runWithEnvelope
+
+**Definition:** A centralized command runner function defined in `errors.go` that executes a command function, writes the result via the JSON envelope system, logs an audit event, and exits with the appropriate exit code on error. It is the standard "run a command" wrapper that new commands should adopt.
+
+**Context:** Signature: `runWithEnvelope(cmd *cobra.Command, humanFn func(data any), fn func() (any, error))`. On success, it calls `writeEnvelopeHuman()` with the data and the human renderer, then logs an "ok" audit event. On error, it classifies the error via `toCliError()`, prints a colored error in human mode, writes the error envelope in JSON mode, logs an "error" audit event, and calls `os.Exit()` with the exit code from the `cliError`. This eliminates duplicated error handling across commands.
+
+**Not to be confused with:** `writeEnvelopeHuman()` (which only handles output formatting, not error classification or exit codes). `runWithEnvelope` is the full lifecycle wrapper; `writeEnvelopeHuman` is the lower-level output function.
 
 ---
 
@@ -204,6 +274,16 @@ Canonical definitions for terms used across the Carto codebase, documentation, a
 **Context:** Implemented in the `storage` package. The tier determines which layers of the context graph are included in query results. Mini returns high-level summaries; full returns the complete context graph. Selected via CLI flags or API parameters.
 
 **Not to be confused with:** LLM tiers (fast/deep), which refer to the models used during indexing, not retrieval.
+
+---
+
+### TTY Auto-Detection
+
+**Definition:** A mechanism in the Carto CLI that automatically determines whether to emit JSON envelope output or human-readable colored output based on whether stdout is connected to a terminal. Implemented via `isJSONMode()` in `output.go` using `golang.org/x/term.IsTerminal()`.
+
+**Context:** The detection priority is: (1) `--json` flag explicitly set -- JSON mode. (2) `--pretty` flag explicitly set -- human mode (overrides `--json`). (3) Neither flag -- fall back to TTY check: non-terminal stdout triggers JSON; terminal stdout triggers human. This means piping output to another program, redirecting to a file, or capturing from an AI agent subprocess automatically triggers JSON without any flags. The design eliminates the need for CI pipelines and agents to remember `--json`.
+
+**Not to be confused with:** The `--json` flag itself (which is an explicit override). TTY auto-detection is the fallback behavior when no explicit flag is set.
 
 ---
 

@@ -2,25 +2,40 @@
 type: config-reference
 audience: external
 status: draft
-generated: 2026-02-28
+generated: 2026-03-06
 source-tier: carto
 hermes-version: 1.0.0
 ---
 
 # Configuration Reference
 
-Carto is configured through environment variables. You can set these in your shell, in a `.env` file in the project root, or pass them directly when running Carto.
+Carto is configured through environment variables, a persisted config file, and CLI flags. You can set configuration in your shell, in a `.env` file, via `carto init`, or pass values directly as flags when running commands.
 
 ## Setting Configuration
 
-**Shell export (temporary, current session only):**
+### Using `carto init` (Recommended)
+
+The fastest way to configure Carto is the setup wizard:
+
+```bash
+# Interactive mode -- prompts for each value
+carto init
+
+# Non-interactive mode -- provide everything via flags
+carto init --non-interactive \
+  --llm-provider anthropic \
+  --api-key sk-ant-api03-your-key-here \
+  --memories-url http://localhost:8900
+```
+
+### Shell Export (Temporary, Current Session Only)
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-api03-your-key-here"
 export CARTO_FAST_MODEL="claude-haiku-4-5-20251001"
 ```
 
-**`.env` file (persistent, per project):**
+### `.env` File (Persistent, Per Project)
 
 Create a `.env` file in the directory where you run Carto:
 
@@ -30,10 +45,132 @@ CARTO_FAST_MODEL=claude-haiku-4-5-20251001
 MEMORIES_URL=http://localhost:8900
 ```
 
-**Inline (one-off commands):**
+### Inline (One-Off Commands)
 
 ```bash
-LLM_PROVIDER=openai LLM_API_KEY=sk-your-key carto index .
+LLM_PROVIDER=openai LLM_API_KEY=sk-your-key carto index --path . --name my-project
+```
+
+### Using `carto config`
+
+You can also view and update individual settings via the CLI:
+
+```bash
+# View current config
+carto config
+
+# Set a value
+carto config --set llm_provider=anthropic
+```
+
+### Using `carto auth`
+
+For managing API keys specifically:
+
+```bash
+# Store a key in the persisted config
+carto auth set-key anthropic sk-ant-api03-your-key-here
+
+# Check which keys are configured
+carto auth status
+```
+
+---
+
+## Global CLI Flags
+
+These flags are available on every command and override environment variable settings.
+
+### `--json`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | boolean |
+| **Default** | Auto-detected (true when stdout is not a terminal) |
+
+Force machine-readable JSON output. When piped, JSON is emitted automatically without needing this flag.
+
+```bash
+carto status --project myapp --json
+```
+
+### `--pretty`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | boolean |
+| **Default** | `false` |
+
+Force human-readable output even when stdout is piped. This overrides both `--json` and TTY auto-detection.
+
+```bash
+carto status --project myapp --pretty | less
+```
+
+### `--yes` / `-y`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | boolean |
+| **Default** | `false` |
+
+Skip all confirmation prompts. Use this for automation, CI/CD pipelines, or when calling Carto from other tools.
+
+```bash
+carto projects delete --name old-project --yes
+carto import --project myapp --strategy replace -y < data.ndjson
+```
+
+### `--quiet` / `-q`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | boolean |
+| **Default** | `false` |
+
+Suppress progress spinners and intermediate output. Only the final result is shown.
+
+```bash
+carto index --path . --name myapp --quiet
+```
+
+### `--verbose` / `-v`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | boolean |
+| **Default** | `false` |
+
+Print verbose diagnostic output to stderr. Useful for debugging configuration or connectivity issues.
+
+```bash
+carto doctor --verbose
+```
+
+### `--log-file`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string (file path) |
+| **Default** | -- (uses `CARTO_AUDIT_LOG` if set) |
+
+Append structured JSON audit events to this file. Each command execution writes one audit entry with timestamp, command name, result, and metadata.
+
+```bash
+carto index --path . --name myapp --log-file /var/log/carto-audit.log
+```
+
+### `--profile`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string |
+| **Default** | `"default"` (or `CARTO_PROFILE` env var) |
+
+Select a named configuration profile. This allows you to maintain separate configurations for different environments (e.g., development, staging, production).
+
+```bash
+carto doctor --profile staging
 ```
 
 ---
@@ -183,6 +320,72 @@ export MEMORIES_API_KEY="your-memories-api-key"
 
 ---
 
+## Server Configuration
+
+These variables control the Carto web server started by `carto serve`.
+
+### `CARTO_SERVER_TOKEN`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string |
+| **Default** | -- (empty = no authentication) |
+| **Required** | No (recommended for production) |
+
+Bearer token for the web server. When set, all API requests must include this token in the `Authorization` header. When empty, the server runs in dev mode with no authentication.
+
+```bash
+export CARTO_SERVER_TOKEN="a-strong-random-value"
+```
+
+### `CARTO_CORS_ORIGINS`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string (comma-separated) |
+| **Default** | -- |
+| **Required** | No |
+
+Comma-separated list of allowed CORS origins for the web server.
+
+```bash
+export CARTO_CORS_ORIGINS="http://localhost:3000,https://your-app.example.com"
+```
+
+---
+
+## Audit and Profiles
+
+### `CARTO_AUDIT_LOG`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string (file path) |
+| **Default** | -- (audit logging disabled) |
+| **Required** | No |
+
+File path for structured JSON audit logs. When set, every CLI command writes an audit entry to this file. You can query these logs with `carto logs`.
+
+```bash
+export CARTO_AUDIT_LOG="/var/log/carto-audit.log"
+```
+
+### `CARTO_PROFILE`
+
+| Detail | Value |
+|--------|-------|
+| **Type** | string |
+| **Default** | `"default"` |
+| **Required** | No |
+
+The name of the configuration profile to use. This allows you to maintain separate sets of configuration for different environments. You can also override this per-command with the `--profile` flag.
+
+```bash
+export CARTO_PROFILE="staging"
+```
+
+---
+
 ## Source Credentials
 
 These variables provide authentication tokens for external source integrations. Each one is optional -- you only need to set the ones for services you want Carto to pull context from.
@@ -310,6 +513,14 @@ CARTO_MAX_CONCURRENT=10
 MEMORIES_URL=http://localhost:8900
 MEMORIES_API_KEY=your-memories-key
 
+# Server
+CARTO_SERVER_TOKEN=my-secure-token
+CARTO_CORS_ORIGINS=http://localhost:3000
+
+# Audit logging
+CARTO_AUDIT_LOG=/var/log/carto-audit.log
+CARTO_PROFILE=default
+
 # Sources (enable what you need)
 GITHUB_TOKEN=ghp_your-github-token
 JIRA_URL=https://yourcompany.atlassian.net
@@ -351,3 +562,15 @@ export CARTO_FAST_MODEL="llama3.2"
 export CARTO_DEEP_MODEL="llama3.2:70b"
 # No API key needed for local Ollama
 ```
+
+---
+
+## Configuration Precedence
+
+When the same setting is configured in multiple places, Carto applies this order (highest priority first):
+
+1. **CLI flags** (`--json`, `--profile`, `--log-file`, etc.)
+2. **Environment variables** (`LLM_PROVIDER`, `MEMORIES_URL`, etc.)
+3. **`.env` file** in the current directory
+4. **Persisted config file** (written by `carto init` or `carto auth set-key`)
+5. **Built-in defaults**
