@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/divyekant/carto/internal/config"
@@ -20,6 +22,14 @@ import (
 	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
+
+// serverStartTime records when the server process started, used for the
+// uptime_seconds metric in the /api/metrics response.
+var serverStartTime = time.Now()
+
+// requestCounter tracks the total number of HTTP requests served since
+// startup, incremented by the logging middleware.
+var requestCounter atomic.Int64
 
 // ProjectInfo describes an indexed project discovered in the projects directory.
 type ProjectInfo struct {
@@ -204,6 +214,8 @@ type configResponse struct {
 	FastModel     string `json:"fast_model"`
 	DeepModel     string `json:"deep_model"`
 	MaxConcurrent int    `json:"max_concurrent"`
+	FastMaxTokens int    `json:"fast_max_tokens"`
+	DeepMaxTokens int    `json:"deep_max_tokens"`
 	LLMProvider   string `json:"llm_provider"`
 	LLMApiKey     string `json:"llm_api_key"`
 	LLMBaseURL    string `json:"llm_base_url"`
@@ -229,6 +241,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
+		FastMaxTokens: cfg.FastMaxTokens,
+		DeepMaxTokens: cfg.DeepMaxTokens,
 		LLMProvider:   cfg.LLMProvider,
 		LLMApiKey:     redactKey(cfg.LLMApiKey),
 		LLMBaseURL:    cfg.LLMBaseURL,
@@ -274,8 +288,16 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 				s.cfg.DeepModel = v
 			}
 		case "max_concurrent":
-			if v, ok := val.(float64); ok {
+			if v, ok := val.(float64); ok && v >= 1 {
 				s.cfg.MaxConcurrent = int(v)
+			}
+		case "fast_max_tokens":
+			if v, ok := val.(float64); ok && v >= 1 {
+				s.cfg.FastMaxTokens = int(v)
+			}
+		case "deep_max_tokens":
+			if v, ok := val.(float64); ok && v >= 1 {
+				s.cfg.DeepMaxTokens = int(v)
 			}
 		case "llm_provider":
 			if v, ok := val.(string); ok {
@@ -593,20 +615,27 @@ type browseItem struct {
 }
 
 // handleBrowse returns subdirectories at a given path for the folder picker.
+//
+// Security: when projectsDir is configured, browsing is restricted to
+// projectsDir and the user's home directory. This prevents arbitrary filesystem
+// traversal in production deployments where CARTO_SERVER_TOKEN is set.
+// When projectsDir is empty (dev mode), any accessible path is allowed.
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	requestedPath := r.URL.Query().Get("path")
 
-	if requestedPath == "" {
-		if s.projectsDir != "" {
-			requestedPath = s.projectsDir
-		} else {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "cannot determine home directory")
-				return
-			}
-			requestedPath = home
+	// Determine the default root to browse from.
+	browseRoot := s.projectsDir
+	if browseRoot == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot determine home directory")
+			return
 		}
+		browseRoot = home
+	}
+
+	if requestedPath == "" {
+		requestedPath = browseRoot
 	}
 
 	absPath, err := filepath.Abs(requestedPath)
@@ -615,7 +644,32 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the path is readable (the filesystem itself is the boundary).
+	// ── Path restriction (security hardening) ──────────────────────────────
+	// When projectsDir is configured, restrict browsing to projectsDir and the
+	// home directory so the server cannot be used to traverse arbitrary paths.
+	if s.projectsDir != "" {
+		absProjects, projErr := filepath.Abs(s.projectsDir)
+		home, homeErr := os.UserHomeDir()
+		absHome := ""
+		if homeErr == nil {
+			absHome, _ = filepath.Abs(home)
+		}
+
+		allowed := false
+		if projErr == nil && (absPath == absProjects || strings.HasPrefix(absPath, absProjects+string(filepath.Separator))) {
+			allowed = true
+		}
+		if absHome != "" && (absPath == absHome || strings.HasPrefix(absPath, absHome+string(filepath.Separator))) {
+			allowed = true
+		}
+
+		if !allowed {
+			writeError(w, http.StatusForbidden, "path is outside the allowed browse scope")
+			return
+		}
+	}
+
+	// Verify the path is readable.
 	if _, err := os.Stat(absPath); err != nil {
 		writeError(w, http.StatusBadRequest, "path not accessible: "+err.Error())
 		return
@@ -910,4 +964,138 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 		Sources:     srcMap,
 		Credentials: creds,
 	})
+}
+
+// metricsResponse is the JSON shape returned by GET /api/metrics.
+// Fields align with common B2B SaaS observability schemas (Datadog, Prometheus).
+type metricsResponse struct {
+	Version        string  `json:"version"`
+	UptimeSeconds  float64 `json:"uptime_seconds"`
+	GoRoutines     int     `json:"go_routines"`
+	MemAllocMB     float64 `json:"mem_alloc_mb"`
+	MemSysMB       float64 `json:"mem_sys_mb"`
+	GCCycles       uint32  `json:"gc_cycles"`
+	ActiveRuns     int     `json:"active_index_runs"`
+	TotalRequests  int64   `json:"total_requests"`
+	ProjectsDir    string  `json:"projects_dir,omitempty"`
+	AuthEnabled    bool    `json:"auth_enabled"`
+}
+
+// aboutResponse is the JSON shape returned by GET /api/about.
+// It exposes product identity information without leaking any config secrets.
+type aboutResponse struct {
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Tagline     string   `json:"tagline"`
+	Description string   `json:"description"`
+	ForWhom     string   `json:"for_whom"`
+	HowItWorks  string   `json:"how_it_works"`
+	Features    []string `json:"features"`
+	ProjectURL  string   `json:"project_url"`
+	Colors      []struct {
+		Name string `json:"name"`
+		Hex  string `json:"hex"`
+		Role string `json:"role"`
+	} `json:"brand_colors"`
+}
+
+// handleAbout returns a static product identity card with the brand tagline,
+// description, audience, workflow, features, and color palette.
+// This endpoint is intentionally unauthenticated so dashboards and landing
+// pages can embed it without requiring the server token.
+func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
+	type colorEntry struct {
+		Name string `json:"name"`
+		Hex  string `json:"hex"`
+		Role string `json:"role"`
+	}
+
+	resp := aboutResponse{
+		Name:    "Carto",
+		Version: config.Version,
+		Tagline: "Map your codebase. Navigate with intent.",
+		Description: "Carto indexes your source code, documentation, issues, and knowledge " +
+			"bases into a semantic vector store, making every file, pattern, and " +
+			"architectural decision retrievable by meaning — not just keyword.",
+		ForWhom: "Engineering teams that want AI assistants to understand their whole " +
+			"project. Platform engineers building internal developer portals. CTOs " +
+			"who need codebase-wide insights, automated documentation, and " +
+			"dependency graphs on demand.",
+		HowItWorks: "1. Index: Scan your codebase, extract modules, analyse patterns with LLMs, " +
+			"and store semantic embeddings in a layered Memories vector store. " +
+			"2. Query: Ask natural-language questions. Carto retrieves the right code, " +
+			"docs, and context across your entire project history. " +
+			"3. Generate: Produce CLAUDE.md and .cursorrules files so AI assistants " +
+			"receive a detailed map of your project's intent and architecture. " +
+			"4. Integrate: Connect GitHub Issues, Jira, Notion, Slack, and PDFs into " +
+			"one unified knowledge graph.",
+		Features: []string{
+			"Semantic code search across your entire repository",
+			"LLM-powered module intent extraction (Anthropic, OpenAI, Ollama)",
+			"Layered storage: atoms → modules → blueprints → patterns",
+			"CLAUDE.md and .cursorrules generator for AI assistant context",
+			"GitHub, Jira, Linear, Notion, Slack, PDF source connectors",
+			"Incremental re-indexing — only changed files are re-processed",
+			"Docker-native deployment with bearer-auth and audit logging",
+		},
+		ProjectURL: "https://github.com/divyekant/carto",
+	}
+
+	type paletteEntry struct {
+		Name string `json:"name"`
+		Hex  string `json:"hex"`
+		Role string `json:"role"`
+	}
+	palette := []paletteEntry{
+		{"Gold (dark)", "#d4af37", "Primary actions, logo mark, active states (dark theme)"},
+		{"Darkened Gold (light)", "#b8960f", "Primary actions, logo mark, active states (light theme)"},
+		{"Success Green", "#16A34A", "Success indicators and healthy status"},
+		{"Warning Amber", "#CA8A04", "Warnings and advisory messages"},
+		{"Error Red", "#DC2626", "Errors and destructive actions"},
+		{"Info Blue", "#2563EB", "Info callouts and informational states"},
+	}
+
+	// Marshal palette separately so we can embed it as a raw JSON array.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":         resp.Name,
+		"version":      resp.Version,
+		"tagline":      resp.Tagline,
+		"description":  resp.Description,
+		"for_whom":     resp.ForWhom,
+		"how_it_works": resp.HowItWorks,
+		"features":     resp.Features,
+		"project_url":  resp.ProjectURL,
+		"brand_colors": palette,
+	})
+}
+
+// handleMetrics returns lightweight runtime and operational metrics.
+// This endpoint bypasses bearer auth (it is placed before the auth middleware
+// path check) — it intentionally omits sensitive data so it can be consumed
+// by internal monitoring probes without requiring the server token.
+//
+// For Prometheus-style scraping, mount a separate prom exporter; this
+// endpoint serves JSON-based dashboards and ops-team health views.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	s.cfgMu.RLock()
+	authEnabled := s.cfg.ServerToken != ""
+	s.cfgMu.RUnlock()
+
+	resp := metricsResponse{
+		Version:       config.Version,
+		UptimeSeconds: time.Since(serverStartTime).Seconds(),
+		GoRoutines:    runtime.NumGoroutine(),
+		MemAllocMB:    float64(memStats.Alloc) / (1024 * 1024),
+		MemSysMB:      float64(memStats.Sys) / (1024 * 1024),
+		GCCycles:      memStats.NumGC,
+		ActiveRuns:    len(s.runs.ListRuns()),
+		TotalRequests: requestCounter.Load(),
+		ProjectsDir:   s.projectsDir,
+		AuthEnabled:   authEnabled,
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

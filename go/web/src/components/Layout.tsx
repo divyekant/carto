@@ -45,8 +45,7 @@ function SidebarContent({ health, onNavClick }: { health: { memories_healthy: bo
     <>
       {/* Logo */}
       <div className="px-4 py-3 border-b border-border h-12 flex items-center">
-        <span className="text-lg font-bold text-primary">C</span>
-        <span className="text-lg font-bold">arto</span>
+        <span className="text-xl font-bold tracking-tight font-[var(--font-display)]"><span className="text-primary">C</span>arto</span>
       </div>
 
       {/* Navigation */}
@@ -97,6 +96,26 @@ function SidebarContent({ health, onNavClick }: { health: { memories_healthy: bo
         </div>
       </div>
 
+      {/* About link */}
+      <div className="px-2 pb-1">
+        <NavLink
+          to="/about"
+          onClick={onNavClick}
+          aria-label="About"
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+              isActive
+                ? 'bg-primary/10 text-primary font-medium'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            )
+          }
+        >
+          <span className="shrink-0" aria-hidden="true">ℹ</span>
+          <span>About</span>
+        </NavLink>
+      </div>
+
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
         <span className="text-xs text-muted-foreground">v1.1.0</span>
@@ -129,7 +148,7 @@ export function Layout() {
             <rect y="15" width="20" height="2" rx="1" />
           </svg>
         </button>
-        <span className="text-sm font-bold tracking-tight text-primary">Carto</span>
+        <span className="text-sm font-bold tracking-tight text-primary font-[var(--font-display)]">Carto</span>
         <div className="ml-auto">
           <ThemeToggle />
         </div>
