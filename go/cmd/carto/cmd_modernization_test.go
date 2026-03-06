@@ -49,7 +49,7 @@ func withCleanEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY", "LLM_API_KEY", "LLM_PROVIDER",
 		"MEMORIES_URL", "CARTO_SERVER_TOKEN", "CARTO_CORS_ORIGINS",
 		"CARTO_FAST_MAX_TOKENS", "CARTO_DEEP_MAX_TOKENS",
-		"CARTO_PROFILE", "CARTO_AUDIT_LOG",
+		"CARTO_PROFILE", "CARTO_AUDIT_LOG", "PROJECTS_DIR",
 	}
 	saved := map[string]string{}
 	for _, k := range keys {
@@ -67,6 +67,24 @@ func withCleanEnv(t *testing.T) {
 	})
 }
 
+// testRoot creates a minimal root command with persistent flags needed by
+// the output layer (isJSONMode, isYes, etc.), then attaches the given
+// subcommands. Use this instead of bare subcommand constructors when the
+// test needs --json, --pretty, --yes, or other persistent flags.
+func testRoot(subs ...*cobra.Command) *cobra.Command {
+	root := &cobra.Command{Use: "carto", SilenceUsage: true, SilenceErrors: true}
+	root.PersistentFlags().Bool("json", false, "")
+	root.PersistentFlags().Bool("pretty", false, "")
+	root.PersistentFlags().BoolP("yes", "y", false, "")
+	root.PersistentFlags().BoolP("verbose", "v", false, "")
+	root.PersistentFlags().String("log-file", "", "")
+	root.PersistentFlags().String("profile", "", "")
+	for _, s := range subs {
+		root.AddCommand(s)
+	}
+	return root
+}
+
 // =========================================================================
 // carto version
 // =========================================================================
@@ -80,32 +98,38 @@ func TestVersionCmd_ReturnsVersion(t *testing.T) {
 }
 
 func TestVersionCmd_JSONOutput(t *testing.T) {
-	cmd := versionCmd("1.2.3-test")
-	out, err := execCmd(t, cmd, []string{"--json"})
+	cmd := testRoot(versionCmd("1.2.3-test"))
+	out, err := execCmd(t, cmd, []string{"version", "--json"})
 	if err != nil {
 		t.Fatalf("version --json failed: %v", err)
 	}
 
-	var info struct {
-		Version   string `json:"version"`
-		GoVersion string `json:"go_version"`
-		OS        string `json:"os"`
-		Arch      string `json:"arch"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Version   string `json:"version"`
+			GoVersion string `json:"go_version"`
+			OS        string `json:"os"`
+			Arch      string `json:"arch"`
+		} `json:"data"`
 	}
-	if jsonErr := json.Unmarshal([]byte(out), &info); jsonErr != nil {
+	if jsonErr := json.Unmarshal([]byte(out), &env); jsonErr != nil {
 		t.Fatalf("version --json is not valid JSON: %v\nraw: %s", jsonErr, out)
 	}
-	if info.Version != "1.2.3-test" {
-		t.Errorf("expected version 1.2.3-test, got %q", info.Version)
+	if !env.OK {
+		t.Error("expected ok=true")
 	}
-	if info.GoVersion != runtime.Version() {
-		t.Errorf("expected go_version %q, got %q", runtime.Version(), info.GoVersion)
+	if env.Data.Version != "1.2.3-test" {
+		t.Errorf("expected version 1.2.3-test, got %q", env.Data.Version)
 	}
-	if info.OS != runtime.GOOS {
-		t.Errorf("expected os %q, got %q", runtime.GOOS, info.OS)
+	if env.Data.GoVersion != runtime.Version() {
+		t.Errorf("expected go_version %q, got %q", runtime.Version(), env.Data.GoVersion)
 	}
-	if info.Arch != runtime.GOARCH {
-		t.Errorf("expected arch %q, got %q", runtime.GOARCH, info.Arch)
+	if env.Data.OS != runtime.GOOS {
+		t.Errorf("expected os %q, got %q", runtime.GOOS, env.Data.OS)
+	}
+	if env.Data.Arch != runtime.GOARCH {
+		t.Errorf("expected arch %q, got %q", runtime.GOARCH, env.Data.Arch)
 	}
 }
 
@@ -149,30 +173,36 @@ func TestAuthStatus_JSONOutput(t *testing.T) {
 	withCleanEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-testkey1234567890abc")
 
-	cmd := authCmd()
-	out, err := execCmd(t, cmd, []string{"status", "--json"})
+	cmd := testRoot(authCmd())
+	out, err := execCmd(t, cmd, []string{"auth", "status", "--json"})
 	if err != nil {
 		t.Fatalf("auth status --json failed: %v", err)
 	}
 
-	var result struct {
-		Provider string `json:"llm_provider"`
-		Creds    []struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-			Masked string `json:"masked"`
-		} `json:"credentials"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Provider string `json:"llm_provider"`
+			Creds    []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+				Masked string `json:"masked"`
+			} `json:"credentials"`
+		} `json:"data"`
 	}
-	if jsonErr := json.Unmarshal([]byte(out), &result); jsonErr != nil {
+	if jsonErr := json.Unmarshal([]byte(out), &env); jsonErr != nil {
 		t.Fatalf("auth status --json not valid JSON: %v\nraw: %s", jsonErr, out)
 	}
-	if len(result.Creds) == 0 {
+	if !env.OK {
+		t.Error("expected ok=true")
+	}
+	if len(env.Data.Creds) == 0 {
 		t.Error("expected at least one credential row")
 	}
 
 	// Verify masked values don't contain the raw key.
 	rawKey := "sk-ant-api03-testkey1234567890abc"
-	for _, c := range result.Creds {
+	for _, c := range env.Data.Creds {
 		if c.Masked == rawKey {
 			t.Errorf("credential %q must be masked, got raw value", c.Name)
 		}
@@ -313,18 +343,24 @@ func TestConfigGet_JSONOutput(t *testing.T) {
 	withCleanEnv(t)
 	t.Setenv("MEMORIES_URL", "http://localhost:8900")
 
-	cmd := configCmdGroup()
-	out, err := execCmd(t, cmd, []string{"get", "--json"})
+	cmd := testRoot(configCmdGroup())
+	out, err := execCmd(t, cmd, []string{"config", "get", "--json"})
 	if err != nil {
 		t.Fatalf("config get --json failed: %v", err)
 	}
 
-	var result map[string]any
-	if jsonErr := json.Unmarshal([]byte(out), &result); jsonErr != nil {
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	if jsonErr := json.Unmarshal([]byte(out), &env); jsonErr != nil {
 		t.Fatalf("config get --json not valid JSON: %v\nraw: %s", jsonErr, out)
 	}
-	if _, ok := result["memories_url"]; !ok {
-		t.Error("JSON output missing memories_url")
+	if !env.OK {
+		t.Error("expected ok=true")
+	}
+	if _, ok := env.Data["memories_url"]; !ok {
+		t.Error("JSON output missing memories_url in data")
 	}
 }
 
@@ -538,26 +574,33 @@ func TestDoctor_JSONOutput_SkipNetwork(t *testing.T) {
 	withCleanEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-doctorjsonkeyabcdef12345")
 	t.Setenv("MEMORIES_URL", "http://localhost:8900")
+	t.Setenv("PROJECTS_DIR", t.TempDir())
 
-	cmd := doctorCmd()
-	out, _ := execCmd(t, cmd, []string{"--skip-network", "--json"})
+	cmd := testRoot(doctorCmd())
+	out, _ := execCmd(t, cmd, []string{"doctor", "--skip-network", "--json"})
 	// Output may be empty if command errored before writing JSON.
 	if out == "" {
 		t.Skip("no JSON output — doctor may have errored before writing")
 	}
 
-	var result struct {
-		Checks   []map[string]any `json:"checks"`
-		Failures int              `json:"failures"`
-		Warnings int              `json:"warnings"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Checks   []map[string]any `json:"checks"`
+			Failures int              `json:"failures"`
+			Warnings int              `json:"warnings"`
+		} `json:"data"`
 	}
-	if jsonErr := json.Unmarshal([]byte(out), &result); jsonErr != nil {
+	if jsonErr := json.Unmarshal([]byte(out), &env); jsonErr != nil {
 		t.Fatalf("doctor --json not valid JSON: %v\nraw: %s", jsonErr, out)
 	}
-	if len(result.Checks) == 0 {
+	if !env.OK {
+		t.Error("expected ok=true")
+	}
+	if len(env.Data.Checks) == 0 {
 		t.Error("expected at least one doctor check")
 	}
-	for _, c := range result.Checks {
+	for _, c := range env.Data.Checks {
 		if c["name"] == nil {
 			t.Error("check missing 'name' field")
 		}
