@@ -2,10 +2,16 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// Version is the semantic version embedded by the build pipeline.
+// It is used in audit log entries and the /api/health response.
+var Version = "1.1.0"
 
 type Config struct {
 	MemoriesURL   string
@@ -26,6 +32,83 @@ type Config struct {
 	LinearToken   string
 	NotionToken   string
 	SlackToken    string
+	// B2B SaaS security fields.
+	ServerToken string // CARTO_SERVER_TOKEN — empty disables auth (dev mode)
+	CORSOrigins string // CARTO_CORS_ORIGINS — comma-separated allowed origins
+	// Observability fields.
+	AuditLogFile string // CARTO_AUDIT_LOG — file path for structured audit logs
+	// Profile name — selects a named section in the config file.
+	Profile string // CARTO_PROFILE — defaults to "default"
+}
+
+// ValidationError holds one or more human-readable config problems.
+type ValidationError struct {
+	Fields []string
+}
+
+func (e *ValidationError) Error() string {
+	return "config validation failed: " + strings.Join(e.Fields, "; ")
+}
+
+// Validate checks that the Config is internally consistent and has the minimum
+// required values set for normal operation. It returns nil when valid.
+func (c Config) Validate() error {
+	var errs []string
+
+	// LLM provider must be one of the known values.
+	switch c.LLMProvider {
+	case "anthropic", "openai", "ollama", "":
+		// acceptable
+	default:
+		errs = append(errs, fmt.Sprintf("unknown llm_provider %q (expected anthropic|openai|ollama)", c.LLMProvider))
+	}
+
+	// API key required for cloud providers.
+	if c.LLMProvider == "anthropic" || c.LLMProvider == "" {
+		if c.AnthropicKey == "" && c.LLMApiKey == "" {
+			errs = append(errs, "no API key set — configure ANTHROPIC_API_KEY or LLM_API_KEY")
+		}
+	} else if c.LLMProvider == "openai" {
+		if c.LLMApiKey == "" {
+			errs = append(errs, "LLM_API_KEY is required for openai provider")
+		}
+		if c.LLMBaseURL == "" {
+			errs = append(errs, "LLM_BASE_URL is required for openai provider")
+		}
+	}
+
+	// MemoriesURL must start with http/https.
+	if c.MemoriesURL != "" && !strings.HasPrefix(c.MemoriesURL, "http://") && !strings.HasPrefix(c.MemoriesURL, "https://") {
+		errs = append(errs, "memories_url must start with http:// or https://")
+	}
+
+	// MaxConcurrent must be positive.
+	if c.MaxConcurrent < 1 {
+		errs = append(errs, fmt.Sprintf("max_concurrent must be ≥ 1, got %d", c.MaxConcurrent))
+	}
+
+	if len(errs) > 0 {
+		return &ValidationError{Fields: errs}
+	}
+	return nil
+}
+
+// ConfigDir returns the XDG-compliant directory for Carto config files.
+// On Linux/macOS this resolves to ~/.config/carto; on other platforms it
+// falls back to ~/.carto.
+func ConfigDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "carto")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config", "carto")
+	}
+	return ".carto"
+}
+
+// DefaultConfigFilePath returns the path to the default per-user config file.
+func DefaultConfigFilePath() string {
+	return filepath.Join(ConfigDir(), "config.json")
 }
 
 // persistedConfig is the JSON shape written to the config file.
@@ -36,6 +119,8 @@ type persistedConfig struct {
 	FastModel     string `json:"fast_model,omitempty"`
 	DeepModel     string `json:"deep_model,omitempty"`
 	MaxConcurrent int    `json:"max_concurrent,omitempty"`
+	FastMaxTokens int    `json:"fast_max_tokens,omitempty"`
+	DeepMaxTokens int    `json:"deep_max_tokens,omitempty"`
 	LLMProvider   string `json:"llm_provider,omitempty"`
 	LLMApiKey     string `json:"llm_api_key,omitempty"`
 	LLMBaseURL    string `json:"llm_base_url,omitempty"`
@@ -72,6 +157,10 @@ func Load() Config {
 		LinearToken:   os.Getenv("LINEAR_TOKEN"),
 		NotionToken:   os.Getenv("NOTION_TOKEN"),
 		SlackToken:    os.Getenv("SLACK_TOKEN"),
+		ServerToken:   os.Getenv("CARTO_SERVER_TOKEN"),
+		CORSOrigins:   os.Getenv("CARTO_CORS_ORIGINS"),
+		AuditLogFile:  os.Getenv("CARTO_AUDIT_LOG"),
+		Profile:       envOr("CARTO_PROFILE", "default"),
 	}
 
 	// Overlay persisted settings (only non-empty values override).
@@ -96,6 +185,8 @@ func Save(cfg Config) error {
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
+		FastMaxTokens: cfg.FastMaxTokens,
+		DeepMaxTokens: cfg.DeepMaxTokens,
 		LLMProvider:   cfg.LLMProvider,
 		LLMApiKey:     cfg.LLMApiKey,
 		LLMBaseURL:    cfg.LLMBaseURL,
@@ -142,6 +233,12 @@ func mergeConfig(cfg *Config, p persistedConfig) {
 	}
 	if p.MaxConcurrent != 0 {
 		cfg.MaxConcurrent = p.MaxConcurrent
+	}
+	if p.FastMaxTokens != 0 {
+		cfg.FastMaxTokens = p.FastMaxTokens
+	}
+	if p.DeepMaxTokens != 0 {
+		cfg.DeepMaxTokens = p.DeepMaxTokens
 	}
 	if p.LLMProvider != "" {
 		cfg.LLMProvider = p.LLMProvider
@@ -194,6 +291,46 @@ func resolveURLForDocker(rawURL string, inDocker bool) string {
 	u := strings.Replace(rawURL, "localhost", "host.docker.internal", 1)
 	u = strings.Replace(u, "127.0.0.1", "host.docker.internal", 1)
 	return u
+}
+
+// MaskSecret returns a partially-masked representation of a secret value safe
+// for display in UIs and logs. Values ≤ 8 chars are fully redacted.
+// Example: "sk-ant-api03-abcdef" → "sk-ant-a********cdef"
+func MaskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 8 {
+		return "****"
+	}
+	prefix := s[:4]
+	suffix := s[len(s)-4:]
+	return prefix + strings.Repeat("*", 8) + suffix
+}
+
+// Redacted returns a copy of Config with all secret fields replaced by masked
+// values. Use this copy for logging and diagnostics — never log a raw Config.
+func (c Config) Redacted() Config {
+	r := c
+	r.AnthropicKey = MaskSecret(c.AnthropicKey)
+	r.LLMApiKey = MaskSecret(c.LLMApiKey)
+	r.MemoriesKey = MaskSecret(c.MemoriesKey)
+	r.GitHubToken = MaskSecret(c.GitHubToken)
+	r.JiraToken = MaskSecret(c.JiraToken)
+	r.LinearToken = MaskSecret(c.LinearToken)
+	r.NotionToken = MaskSecret(c.NotionToken)
+	r.SlackToken = MaskSecret(c.SlackToken)
+	r.ServerToken = MaskSecret(c.ServerToken)
+	return r
+}
+
+// EffectiveAPIKey returns the API key that will actually be used for LLM calls.
+// LLMApiKey takes priority over the Anthropic-specific AnthropicKey.
+func (c Config) EffectiveAPIKey() string {
+	if c.LLMApiKey != "" {
+		return c.LLMApiKey
+	}
+	return c.AnthropicKey
 }
 
 func IsOAuthToken(key string) bool {
