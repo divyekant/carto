@@ -105,11 +105,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		if done >= total {
 			fmt.Printf("\r%s%s%s %s [%d/%d]%s\n", green, "✓", reset, phase, done, total, reset)
 		} else {
-			fmt.Printf("\r%s%s%s %s [%d/%d]", cyan, frame, reset, phase, done, total)
+			fmt.Printf("\r%s%s%s %s [%d/%d]", gold, frame, reset, phase, done, total)
 		}
 	}
 
-	fmt.Printf("%s%sCarto indexing %s%s\n", bold, cyan, projectName, reset)
+	fmt.Printf("%s%sCarto indexing %s%s\n", bold, gold, projectName, reset)
 	fmt.Printf("  path: %s\n", absPath)
 	if moduleFilter != "" {
 		fmt.Printf("  module filter: %s\n", moduleFilter)
@@ -148,7 +148,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  elapsed:  %s\n", elapsed.Round(time.Millisecond))
 
 	if len(result.Errors) > 0 {
-		fmt.Printf("\n%s%sWarnings:%s\n", bold, yellow, reset)
+		fmt.Printf("\n%s%sWarnings:%s\n", bold, amber, reset)
 		for i, e := range result.Errors {
 			if i >= 10 {
 				fmt.Printf("  ... and %d more\n", len(result.Errors)-10)
@@ -223,7 +223,7 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 		if !quiet {
 			marker := ""
 			if changedOnly {
-				marker = " " + yellow + "(changed)" + reset
+				marker = " " + amber + "(changed)" + reset
 			}
 			fmt.Printf("  %s%s%s%s\n", bold, name, reset, marker)
 		}
@@ -246,7 +246,7 @@ func runIndexAll(cmd *cobra.Command, changedOnly bool) error {
 			}
 			return
 		}
-		fmt.Printf("\n%s%sWould re-index %d project(s) (mode: %s)%s\n", bold, cyan, len(projects), mode, reset)
+		fmt.Printf("\n%s%sWould re-index %d project(s) (mode: %s)%s\n", bold, gold, len(projects), mode, reset)
 	})
 	return nil
 }

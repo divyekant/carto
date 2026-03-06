@@ -64,7 +64,7 @@ func runSourcesList(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, details, func() {
-		fmt.Printf("%s%sSources for %s%s\n\n", bold, cyan, args[0], reset)
+		fmt.Printf("%s%sSources for %s%s\n\n", bold, gold, args[0], reset)
 		for name, entry := range srcCfg.Sources {
 			fmt.Printf("  %s%s%s\n", bold, name, reset)
 			for k, v := range entry.Settings {

@@ -52,7 +52,7 @@ func runModules(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, modules, func() {
-		fmt.Printf("%s%sDetected modules in %s%s\n\n", bold, cyan, absPath, reset)
+		fmt.Printf("%s%sDetected modules in %s%s\n\n", bold, gold, absPath, reset)
 
 		if len(modules) == 0 {
 			fmt.Println("  No modules detected.")

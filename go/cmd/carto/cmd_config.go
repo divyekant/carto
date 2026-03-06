@@ -80,13 +80,13 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, configMap, func() {
-		fmt.Printf("%s%sConfiguration%s  profile: %s\n\n", bold, cyan, reset, profile)
+		fmt.Printf("%s%sConfiguration%s  profile: %s\n\n", bold, gold, reset, profile)
 		if config.ConfigPath != "" {
-			fmt.Printf("  %sfile:%s %s\n\n", cyan, reset, config.ConfigPath)
+			fmt.Printf("  %sfile:%s %s\n\n", gold, reset, config.ConfigPath)
 		}
 
 		// ── Non-sensitive settings ────────────────────────────────────────
-		fmt.Printf("  %s%sSettings%s\n", bold, yellow, reset)
+		fmt.Printf("  %s%sSettings%s\n", bold, gold, reset)
 		settingKeys := []string{
 			"llm_provider", "fast_model", "deep_model",
 			"max_concurrent", "fast_max_tokens", "deep_max_tokens",
@@ -101,7 +101,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		}
 
 		// ── Credential presence ───────────────────────────────────────────
-		fmt.Printf("\n  %s%sCredentials%s  (masked — use 'carto auth status' for details)\n", bold, yellow, reset)
+		fmt.Printf("\n  %s%sCredentials%s  (masked — use 'carto auth status' for details)\n", bold, gold, reset)
 		credKeys := []string{
 			"anthropic_key", "llm_api_key", "memories_key",
 			"github_token", "jira_token", "linear_token",
@@ -125,8 +125,8 @@ func maskPresence(val string) string {
 	return config.MaskSecret(val)
 }
 
-// dimmed returns the string wrapped in a dark ANSI colour for de-emphasis.
-func dimmed(s string) string { return "\033[2m" + s + reset }
+// dimmed returns the string wrapped in the warm-neutral stone colour for de-emphasis.
+func dimmed(s string) string { return stone + s + reset }
 
 func configSetCmd() *cobra.Command {
 	return &cobra.Command{
@@ -296,7 +296,7 @@ func runConfigPath(cmd *cobra.Command, _ []string) error {
 	}
 
 	writeOutput(cmd, out, func() {
-		fmt.Printf("%s%sConfig Paths%s\n\n", bold, cyan, reset)
+		fmt.Printf("%s%sConfig Paths%s\n\n", bold, gold, reset)
 		dirStatus := checkMark(out.DirExists)
 		fileStatus := checkMark(out.FileExists)
 		fmt.Printf("  %s Config dir:    %s\n", dirStatus, cfgDir)

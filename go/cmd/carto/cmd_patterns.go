@@ -90,7 +90,7 @@ func runPatterns(cmd *cobra.Command, args []string) error {
 		Modules:     moduleSummaries,
 	}
 
-	fmt.Printf("%s%sGenerating patterns for %s%s\n", bold, cyan, absPath, reset)
+	fmt.Printf("%s%sGenerating patterns for %s%s\n", bold, gold, absPath, reset)
 	fmt.Printf("  modules: %d, format: %s\n\n", len(result.Modules), format)
 
 	if err := patterns.WriteFiles(absPath, input, format); err != nil {

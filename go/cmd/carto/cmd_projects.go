@@ -77,7 +77,7 @@ func runProjectsList(cmd *cobra.Command, args []string) error {
 			fmt.Println("No indexed projects found.")
 			return
 		}
-		fmt.Printf("%s%sIndexed projects%s\n\n", bold, cyan, reset)
+		fmt.Printf("%s%sIndexed projects%s\n\n", bold, gold, reset)
 		fmt.Printf("  %-25s %-8s %s\n", "NAME", "FILES", "INDEXED AT")
 		fmt.Printf("  %-25s %-8s %s\n",
 			strings.Repeat("-", 25),
@@ -150,13 +150,13 @@ func runProjectsShow(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, data, func() {
-		fmt.Printf("%s%sProject: %s%s\n\n", bold, cyan, data.Name, reset)
-		fmt.Printf("  %sPath:%s        %s\n", cyan, reset, data.Path)
-		fmt.Printf("  %sFiles:%s       %d\n", cyan, reset, data.Files)
-		fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, data.TotalSize)
-		fmt.Printf("  %sIndexed at:%s  %s\n", cyan, reset, data.IndexedAt)
+		fmt.Printf("%s%sProject: %s%s\n\n", bold, gold, data.Name, reset)
+		fmt.Printf("  %sPath:%s        %s\n", gold, reset, data.Path)
+		fmt.Printf("  %sFiles:%s       %d\n", gold, reset, data.Files)
+		fmt.Printf("  %sTotal size:%s  %s\n", gold, reset, data.TotalSize)
+		fmt.Printf("  %sIndexed at:%s  %s\n", gold, reset, data.IndexedAt)
 		if len(data.Sources) > 0 {
-			fmt.Printf("  %sSources:%s     %s\n", cyan, reset, strings.Join(data.Sources, ", "))
+			fmt.Printf("  %sSources:%s     %s\n", gold, reset, strings.Join(data.Sources, ", "))
 		}
 	})
 	return nil

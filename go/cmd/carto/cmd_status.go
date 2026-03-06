@@ -32,8 +32,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	if mf.IsEmpty() {
 		writeOutput(cmd, map[string]interface{}{"indexed": false, "path": absPath}, func() {
-			fmt.Printf("%s%sIndex status for %s%s\n\n", bold, cyan, absPath, reset)
-			fmt.Printf("  %sNo index found.%s Run %scarto index %s%s to create one.\n", yellow, reset, bold, absPath, reset)
+			fmt.Printf("%s%sIndex status for %s%s\n\n", bold, gold, absPath, reset)
+			fmt.Printf("  %sNo index found.%s Run %scarto index %s%s to create one.\n", amber, reset, bold, absPath, reset)
 		})
 		return nil
 	}
@@ -64,11 +64,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, data, func() {
-		fmt.Printf("%s%sIndex status for %s%s\n\n", bold, cyan, absPath, reset)
-		fmt.Printf("  %sProject:%s     %s\n", cyan, reset, data.Project)
-		fmt.Printf("  %sLast indexed:%s %s\n", cyan, reset, data.IndexedAt)
-		fmt.Printf("  %sFiles:%s       %d\n", cyan, reset, data.Files)
-		fmt.Printf("  %sTotal size:%s  %s\n", cyan, reset, data.TotalSize)
+		fmt.Printf("%s%sIndex status for %s%s\n\n", bold, gold, absPath, reset)
+		fmt.Printf("  %sProject:%s     %s\n", gold, reset, data.Project)
+		fmt.Printf("  %sLast indexed:%s %s\n", gold, reset, data.IndexedAt)
+		fmt.Printf("  %sFiles:%s       %d\n", gold, reset, data.Files)
+		fmt.Printf("  %sTotal size:%s  %s\n", gold, reset, data.TotalSize)
 	})
 
 	return nil

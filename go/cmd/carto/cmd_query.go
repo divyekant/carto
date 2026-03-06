@@ -43,17 +43,17 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		}
 
 		writeOutput(cmd, results, func() {
-			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, cyan, project, tier, reset)
+			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, gold, project, tier, reset)
 
 			for layer, entries := range results {
 				if len(entries) == 0 {
 					continue
 				}
-				fmt.Printf("%s%s[%s]%s\n", bold, yellow, layer, reset)
+				fmt.Printf("%s%s[%s]%s\n", bold, gold, layer, reset)
 				for _, entry := range entries {
 					snippet := truncateText(entry.Text, 200)
-					fmt.Printf("  %ssource:%s %s\n", cyan, reset, entry.Source)
-					fmt.Printf("  %sscore:%s  %.4f\n", cyan, reset, entry.Score)
+					fmt.Printf("  %ssource:%s %s\n", gold, reset, entry.Source)
+					fmt.Printf("  %sscore:%s  %.4f\n", gold, reset, entry.Score)
 					fmt.Printf("  %s\n\n", snippet)
 				}
 			}
@@ -71,7 +71,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	writeOutput(cmd, results, func() {
-		fmt.Printf("%s%sSearch results for: %q%s (k=%d)\n\n", bold, cyan, query, reset, count)
+		fmt.Printf("%s%sSearch results for: %q%s (k=%d)\n\n", bold, gold, query, reset, count)
 
 		if len(results) == 0 {
 			fmt.Println("  No results found.")
@@ -80,7 +80,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 		for i, r := range results {
 			snippet := truncateText(r.Text, 200)
-			fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, cyan, reset, r.Source, cyan, reset, r.Score)
+			fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, gold, reset, r.Source, gold, reset, r.Score)
 			fmt.Printf("   %s\n\n", snippet)
 		}
 	})

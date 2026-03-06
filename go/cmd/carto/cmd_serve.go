@@ -58,11 +58,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if cfg.ServerToken == "" {
 		fmt.Fprintf(os.Stderr,
 			"%s%sWARN:%s Authentication is disabled. Set CARTO_SERVER_TOKEN to require a Bearer token.\n",
-			yellow, bold, reset,
+			amber, bold, reset,
 		)
 	}
 
-	fmt.Printf("%s%sCarto server%s starting on http://localhost:%s\n", bold, cyan, reset, port)
+	fmt.Printf("%s%sCarto server%s starting on http://localhost:%s\n", bold, gold, reset, port)
 
 	// Build an http.Server with sane production timeouts.
 	// WriteTimeout is generous (10 min) because SSE progress streams for large

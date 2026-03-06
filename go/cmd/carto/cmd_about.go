@@ -65,19 +65,19 @@ func runAbout(cmd *cobra.Command, _ []string) error {
 
 	writeOutput(cmd, data, func() {
 		// ── Header ──────────────────────────────────────────────────────────
-		fmt.Printf("\n  %s%s%s%s\n", bold, cyan, AppName, reset)
+		fmt.Printf("\n  %s%s%s%s\n", bold, gold, AppName, reset)
 		fmt.Printf("  %s\n", Tagline)
 		fmt.Printf("  version %s%s%s\n\n", bold, version, reset)
 
 		// ── Description ─────────────────────────────────────────────────────
-		fmt.Printf("%s%sWhat is Carto?%s\n", bold, cyan, reset)
+		fmt.Printf("%s%sWhat is Carto?%s\n", bold, gold, reset)
 		fmt.Printf("  Carto indexes your source code, documentation, issues, and\n")
 		fmt.Printf("  knowledge bases into a semantic vector store, making every file,\n")
 		fmt.Printf("  pattern, and architectural decision retrievable by meaning —\n")
 		fmt.Printf("  not just keyword.\n\n")
 
 		// ── For Whom ────────────────────────────────────────────────────────
-		fmt.Printf("%s%sWho is it for?%s\n", bold, cyan, reset)
+		fmt.Printf("%s%sWho is it for?%s\n", bold, gold, reset)
 		fmt.Printf("  • Engineering teams that want AI assistants to understand their\n")
 		fmt.Printf("    whole project, not just the file currently open.\n")
 		fmt.Printf("  • Platform engineers building internal developer portals.\n")
@@ -85,7 +85,7 @@ func runAbout(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("    and dependency graphs on demand.\n\n")
 
 		// ── How It Works ────────────────────────────────────────────────────
-		fmt.Printf("%s%sHow it works%s\n", bold, cyan, reset)
+		fmt.Printf("%s%sHow it works%s\n", bold, gold, reset)
 		fmt.Printf("  %s1. Index%s    Scan your codebase, extract modules, analyse patterns\n", bold, reset)
 		fmt.Printf("            with LLMs, and store semantic embeddings in a layered\n")
 		fmt.Printf("            Memories vector store.\n")
@@ -97,23 +97,23 @@ func runAbout(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("            into one unified knowledge graph.\n\n")
 
 		// ── Features ────────────────────────────────────────────────────────
-		fmt.Printf("%s%sHeadline features%s\n", bold, cyan, reset)
+		fmt.Printf("%s%sHeadline features%s\n", bold, gold, reset)
 		for _, f := range features {
-			fmt.Printf("  %s•%s %s\n", cyan, reset, f)
+			fmt.Printf("  %s•%s %s\n", gold, reset, f)
 		}
 		fmt.Printf("\n")
 
 		// ── Color palette ───────────────────────────────────────────────────
-		fmt.Printf("%s%sBrand colors%s\n", bold, cyan, reset)
-		fmt.Printf("  %-14s %s#5B50F5%s  primary actions, logo mark, active states\n", "Brand Indigo", bold, reset)
-		fmt.Printf("  %-14s %s#0EA5A0%s  info callouts, success badges\n", "Brand Teal", bold, reset)
+		fmt.Printf("%s%sBrand colors%s\n", bold, gold, reset)
+		fmt.Printf("  %-14s %s#d4af37%s  primary actions, headers, active states\n", "Brand Gold", bold, reset)
+		fmt.Printf("  %-14s %s#78716c%s  neutral text, borders, de-emphasis\n", "Stone", bold, reset)
 		fmt.Printf("  %-14s %s#F59E0B%s  warnings\n", "Amber", bold, reset)
 		fmt.Printf("  %-14s %s#F43F5E%s  errors and destructive actions\n", "Rose", bold, reset)
 		fmt.Printf("  %-14s %s#10B981%s  success indicators\n", "Emerald", bold, reset)
 		fmt.Printf("\n")
 
 		// ── Footer ──────────────────────────────────────────────────────────
-		fmt.Printf("  %s%s%s\n\n", cyan, ProjectURL, reset)
+		fmt.Printf("  %s%s%s\n\n", gold, ProjectURL, reset)
 	})
 
 	return nil

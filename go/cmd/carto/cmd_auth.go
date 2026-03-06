@@ -99,7 +99,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	writeOutput(cmd, out, func() {
 		fmt.Printf("%s%sAuth Status%s  profile: %s  provider: %s\n\n",
-			bold, cyan, reset, profile, cfg.LLMProvider)
+			bold, gold, reset, profile, cfg.LLMProvider)
 		fmt.Printf("  %-20s %-8s %-25s %s\n", "CREDENTIAL", "STATUS", "MASKED VALUE", "NOTE")
 		fmt.Printf("  %-20s %-8s %-25s %s\n",
 			strings.Repeat("-", 20), strings.Repeat("-", 8),
@@ -315,7 +315,7 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 		res := result{Provider: provider, Status: "reachable", Latency: latency,
 			Error: fmt.Sprintf("unexpected status %d", resp.StatusCode)}
 		writeOutput(cmd, res, func() {
-			fmt.Printf("%s⚠%s %s responded %d — may still work\n", yellow, reset, provider, resp.StatusCode)
+			fmt.Printf("%s⚠%s %s responded %d — may still work\n", amber, reset, provider, resp.StatusCode)
 		})
 		logAuditEvent(cmd, "ok", fmt.Sprintf("http_%d", resp.StatusCode), nil)
 	}

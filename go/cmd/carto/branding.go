@@ -8,24 +8,21 @@ package main
 //
 // ─── Color Palette ─────────────────────────────────────────────────────────
 //
-//  Name              Hex        OKLCH                      Role
-//  ──────────────── ────────── ─────────────────────────  ───────────────────
-//  Brand Indigo      #5B50F5   oklch(0.511 0.233 267.4)  Primary actions,
-//                                                          logo mark, active
-//                                                          nav, focus rings
-//  Brand Teal        #0EA5A0   oklch(0.630 0.118 185.4)  Info callouts,
-//                                                          success badges
-//  Slate (neutral)             monochrome oklch slate     Backgrounds, text,
-//                                                          borders, cards
-//  Amber             #F59E0B   oklch(0.748 0.183 73.8)   Warnings
-//  Rose              #F43F5E   oklch(0.614 0.239 11.5)   Errors / destructive
-//  Emerald           #10B981   oklch(0.726 0.175 158.4)  Success indicators
+//  Name              Hex        Role
+//  ──────────────── ────────── ───────────────────────────────────────────
+//  Brand Gold        #d4af37   Primary actions, headers, active states,
+//                               logo mark, focus rings
+//  Stone             #78716c   Neutral text, borders, de-emphasis
+//  Amber             #F59E0B   Warnings
+//  Rose              #F43F5E   Errors / destructive actions
+//  Emerald           #10B981   Success indicators
 //
 // CLI ANSI palette (terminals do not render arbitrary hex colours):
-//   cyan  (\033[36m) — maps to Brand Indigo role in terminal output
-//   green (\033[32m) — success indicators
-//   yellow(\033[33m) — warnings
-//   red   (\033[31m) — errors
+//   gold  (\033[33m)       — maps to Brand Gold role in terminal output
+//   green (\033[32m)       — success indicators
+//   amber (\033[38;5;214m) — warnings (256-color, distinct from gold)
+//   red   (\033[31m)       — errors
+//   stone (\033[38;5;249m) — de-emphasis, neutral text
 
 const (
 	// AppName is the canonical product name.

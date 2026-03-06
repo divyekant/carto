@@ -48,7 +48,7 @@ The --json flag emits a machine-readable JSON object suitable for CI pipelines:
 			}
 
 			writeOutput(cmd, info, func() {
-				fmt.Printf("%s%scarto%s %s\n", bold, cyan, reset, ver)
+				fmt.Printf("%s%scarto%s %s\n", bold, gold, reset, ver)
 				fmt.Printf("  go:   %s\n", info.GoVersion)
 				fmt.Printf("  os:   %s/%s\n", info.OS, info.Arch)
 			})

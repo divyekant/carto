@@ -41,7 +41,7 @@ func (c doctorCheck) icon() string {
 	case checkOK:
 		return green + "✓" + reset
 	case checkWarn:
-		return yellow + "⚠" + reset
+		return amber + "⚠" + reset
 	default:
 		return red + "✗" + reset
 	}
@@ -316,11 +316,11 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	writeOutput(cmd, out, func() {
-		fmt.Printf("%s%sCarto Doctor%s  profile: %s\n\n", bold, cyan, reset, profile)
+		fmt.Printf("%s%sCarto Doctor%s  profile: %s\n\n", bold, gold, reset, profile)
 		for _, c := range checks {
 			fmt.Printf("  %s %-22s %s\n", c.icon(), c.Name, c.Message)
 			if c.Hint != "" {
-				fmt.Printf("      %s↳%s %s\n", yellow, reset, c.Hint)
+				fmt.Printf("      %s↳%s %s\n", amber, reset, c.Hint)
 			}
 		}
 		fmt.Println()
@@ -331,7 +331,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 				bold, red, failures, reset)
 		case warnings > 0:
 			fmt.Printf("%s%s%d warning(s).%s %sEverything required is set; review warnings for hardening.%s\n",
-				bold, yellow, warnings, reset, yellow, reset)
+				bold, amber, warnings, reset, amber, reset)
 		default:
 			fmt.Printf("%s%sAll checks passed.%s Carto is ready.\n", bold, green, reset)
 		}

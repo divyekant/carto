@@ -13,13 +13,15 @@ import (
 // ─── ANSI colour codes ─────────────────────────────────────────────────────
 
 // ANSI escape codes for colored output.
+// Maps to the Carto gold brand palette for terminal rendering.
 const (
-	bold   = "\033[1m"
-	green  = "\033[32m"
-	yellow = "\033[33m"
-	cyan   = "\033[36m"
-	red    = "\033[31m"
-	reset  = "\033[0m"
+	bold  = "\033[1m"
+	gold  = "\033[33m"        // brand gold #d4af37 — primary accent
+	green = "\033[32m"        // success #10B981
+	amber = "\033[38;5;214m"  // warnings #F59E0B — distinct from gold
+	red   = "\033[31m"        // errors #F43F5E
+	stone = "\033[38;5;249m"  // de-emphasis — warm neutral
+	reset = "\033[0m"
 )
 
 // ─── Exit codes (Unix convention) ─────────────────────────────────────────
@@ -107,7 +109,7 @@ func printError(format string, args ...any) {
 
 // printWarn writes a formatted warning to stderr without stopping execution.
 func printWarn(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s%swarn:%s %s\n", bold, yellow, reset, fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s%swarn:%s %s\n", bold, amber, reset, fmt.Sprintf(format, args...))
 }
 
 // isVerbose returns true when the --verbose persistent flag is active in the
@@ -126,7 +128,7 @@ func verboseLog(cmd *cobra.Command, format string, args ...any) {
 	if !isVerbose(cmd) {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "%s[debug]%s %s\n", cyan, reset, fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s[debug]%s %s\n", gold, reset, fmt.Sprintf(format, args...))
 }
 
 // ─── Structured audit log ─────────────────────────────────────────────────
@@ -211,5 +213,8 @@ func checkMark(ok bool) string {
 	return red + "✗" + reset
 }
 
-// warnMark returns a yellow ⚠.
-func warnMark() string { return yellow + "⚠" + reset }
+// warnMark returns an amber ⚠.
+func warnMark() string { return amber + "⚠" + reset }
+
+// stoneText wraps s in the warm-neutral stone colour for de-emphasis.
+func stoneText(s string) string { return stone + s + reset }
