@@ -9,6 +9,7 @@ import IndexRun from './pages/IndexRun'
 import Query from './pages/Query'
 import Settings from './pages/Settings'
 import ProjectDetail from './pages/ProjectDetail'
+import About from './pages/About'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
                 <Route path="/query" element={<Query />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/projects/:name" element={<ProjectDetail />} />
+                <Route path="/about" element={<About />} />
               </Route>
             </Routes>
           </ErrorBoundary>

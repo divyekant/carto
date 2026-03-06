@@ -111,46 +111,156 @@ const PROVIDER_DEFAULTS: Record<string, ProviderConfig> = {
 
 const CUSTOM_MODEL_VALUE = '__custom__'
 
+// ─── Validation ──────────────────────────────────────────────────────────────
+
 interface ValidationErrors {
+  // LLM Provider
   provider?: string
   apiKey?: string
   baseUrl?: string
   fastModel?: string
   deepModel?: string
+  // Memories
   memoriesUrl?: string
+  // Performance
+  maxConcurrent?: string
+  fastMaxTokens?: string
+  deepMaxTokens?: string
+  // Integrations
+  githubToken?: string
+  jiraBaseUrl?: string
+  jiraEmail?: string
+  linearToken?: string
+  notionToken?: string
+  slackToken?: string
 }
 
 function validate(config: Config): ValidationErrors {
   const errors: ValidationErrors = {}
   const provider = config.llm_provider
 
-  if (!provider) errors.provider = 'Provider is required'
-
-  if (provider === 'anthropic') {
-    if (!config.anthropic_key) errors.apiKey = 'Anthropic API key is required'
-  } else if (provider === 'openai') {
-    if (!config.llm_api_key) errors.apiKey = 'API key is required for OpenAI'
+  // ── Provider & API key ──
+  if (!provider) {
+    errors.provider = 'Provider is required'
   }
 
+  if (provider === 'anthropic') {
+    if (!config.anthropic_key) {
+      errors.apiKey = 'Anthropic API key is required'
+    } else if (
+      !config.anthropic_key.includes('****') &&
+      !config.anthropic_key.startsWith('sk-ant-')
+    ) {
+      errors.apiKey = 'Expected format: sk-ant-api03-…'
+    }
+  } else if (provider === 'openai') {
+    if (!config.llm_api_key) {
+      errors.apiKey = 'API key is required for OpenAI'
+    } else if (
+      !config.llm_api_key.includes('****') &&
+      !config.llm_api_key.startsWith('sk-')
+    ) {
+      errors.apiKey = 'Expected format: sk-…'
+    }
+  }
+
+  // ── Base URL ──
   if (provider && provider !== 'anthropic' && !config.llm_base_url) {
     errors.baseUrl = 'Base URL is required for ' + provider
   }
-
   if (config.llm_base_url && !config.llm_base_url.match(/^https?:\/\//)) {
     errors.baseUrl = 'Must start with http:// or https://'
   }
 
+  // ── Models ──
   if (!config.fast_model) errors.fastModel = 'Fast model is required'
   if (!config.deep_model) errors.deepModel = 'Deep model is required'
 
+  // ── Memories URL ──
   if (!config.memories_url) {
     errors.memoriesUrl = 'Memories URL is required'
   } else if (!config.memories_url.match(/^https?:\/\//)) {
     errors.memoriesUrl = 'Must start with http:// or https://'
   }
 
+  // ── Performance ──
+  const maxConcurrent = Number(config.max_concurrent)
+  if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 100) {
+    errors.maxConcurrent = 'Must be an integer between 1 and 100'
+  }
+
+  const fastMaxTokens = Number(config.fast_max_tokens)
+  if (!Number.isInteger(fastMaxTokens) || fastMaxTokens < 256 || fastMaxTokens > 65536) {
+    errors.fastMaxTokens = 'Must be between 256 and 65,536'
+  }
+
+  const deepMaxTokens = Number(config.deep_max_tokens)
+  if (!Number.isInteger(deepMaxTokens) || deepMaxTokens < 256 || deepMaxTokens > 65536) {
+    errors.deepMaxTokens = 'Must be between 256 and 65,536'
+  }
+
+  // ── Integration format hints (only validate if a non-masked value is present) ──
+  if (
+    config.github_token &&
+    !config.github_token.includes('****') &&
+    !config.github_token.startsWith('ghp_') &&
+    !config.github_token.startsWith('github_pat_') &&
+    !config.github_token.startsWith('gho_') &&
+    !config.github_token.startsWith('ghs_')
+  ) {
+    errors.githubToken = 'Expected format: ghp_… or github_pat_…'
+  }
+
+  if (config.jira_base_url && !config.jira_base_url.match(/^https?:\/\//)) {
+    errors.jiraBaseUrl = 'Must start with http:// or https://'
+  }
+
+  if (config.jira_email && !config.jira_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+    errors.jiraEmail = 'Must be a valid email address'
+  }
+
+  if (
+    config.linear_token &&
+    !config.linear_token.includes('****') &&
+    !config.linear_token.startsWith('lin_api_')
+  ) {
+    errors.linearToken = 'Expected format: lin_api_…'
+  }
+
+  if (
+    config.notion_token &&
+    !config.notion_token.includes('****') &&
+    !config.notion_token.startsWith('ntn_') &&
+    !config.notion_token.startsWith('secret_')
+  ) {
+    errors.notionToken = 'Expected format: ntn_… or secret_…'
+  }
+
+  if (
+    config.slack_token &&
+    !config.slack_token.includes('****') &&
+    !config.slack_token.startsWith('xoxb-') &&
+    !config.slack_token.startsWith('xoxp-') &&
+    !config.slack_token.startsWith('xoxa-') &&
+    !config.slack_token.startsWith('xoxs-')
+  ) {
+    errors.slackToken = 'Expected format: xoxb-… or xoxp-…'
+  }
+
   return errors
 }
+
+// All fields that exist in the form — used to mark everything touched on save.
+const ALL_TOUCHED_FIELDS = [
+  'llm_provider', 'anthropic_key', 'llm_api_key', 'llm_base_url',
+  'fast_model', 'deep_model',
+  'memories_url',
+  'max_concurrent', 'fast_max_tokens', 'deep_max_tokens',
+  'github_token', 'jira_base_url', 'jira_email', 'jira_token',
+  'linear_token', 'notion_token', 'slack_token',
+]
+
+// ─── ModelSelect ─────────────────────────────────────────────────────────────
 
 function ModelSelect({ label, description, models, value, onChange, error }: {
   label: string
@@ -193,7 +303,7 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
         value={showCustomInput ? CUSTOM_MODEL_VALUE : value}
         onValueChange={handleSelectChange}
       >
-        <SelectTrigger className="w-full h-8 text-xs">
+        <SelectTrigger className={cn('w-full h-8 text-xs', error && 'border-red-500 focus-visible:ring-red-500')}>
           <SelectValue placeholder="Select a model" />
         </SelectTrigger>
         <SelectContent>
@@ -216,15 +326,17 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
             setCustomValue(e.target.value)
             onChange(e.target.value)
           }}
-          className="h-7 text-xs"
+          className={cn('h-7 text-xs', error && 'border-red-500 focus-visible:ring-red-500')}
           autoFocus
         />
       )}
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <p className="text-sm text-muted-foreground">{description}</p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   )
 }
+
+// ─── Settings page ────────────────────────────────────────────────────────────
 
 export default function Settings() {
   const [config, setConfig] = useState<Config>({
@@ -268,7 +380,12 @@ export default function Settings() {
   }, [])
 
   function updateField(key: keyof Config, value: string | number) {
-    setConfig(prev => ({ ...prev, [key]: value }))
+    setConfig(prev => {
+      const next = { ...prev, [key]: value }
+      // Re-run validation on every change so errors update live
+      setErrors(validate(next))
+      return next
+    })
     setTouched(prev => new Set(prev).add(key))
   }
 
@@ -276,28 +393,31 @@ export default function Settings() {
     const defaults = PROVIDER_DEFAULTS[provider]
     if (!defaults) return
 
-    setConfig(prev => ({
-      ...prev,
-      llm_provider: provider,
-      fast_model: defaults.fast,
-      deep_model: defaults.deep,
-      llm_base_url: defaults.baseUrl,
-    }))
+    setConfig(prev => {
+      const next = {
+        ...prev,
+        llm_provider: provider,
+        fast_model: defaults.fast,
+        deep_model: defaults.deep,
+        llm_base_url: defaults.baseUrl,
+      }
+      setErrors(validate(next))
+      return next
+    })
     setTouched(prev => {
       const next = new Set(prev)
       next.add('llm_provider')
       return next
     })
-    setErrors({})
   }
 
   async function save() {
     const validationErrors = validate(config)
     setErrors(validationErrors)
-    setTouched(new Set(['llm_provider', 'anthropic_key', 'llm_api_key', 'llm_base_url', 'fast_model', 'deep_model', 'memories_url']))
+    setTouched(new Set(ALL_TOUCHED_FIELDS))
 
     if (Object.keys(validationErrors).length > 0) {
-      toast.error('Please fix the errors above.')
+      toast.error('Please fix the errors highlighted below.')
       return
     }
 
@@ -374,6 +494,11 @@ export default function Settings() {
     }
   }
 
+  // Helper: return error message only when the field has been touched
+  function fieldError(touchKey: string, err?: string) {
+    return touched.has(touchKey) && err ? err : undefined
+  }
+
   if (loading) {
     return (
       <div>
@@ -404,14 +529,15 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Section 1: LLM Provider */}
+      {/* ── Section 1: LLM Provider ── */}
       <Section title="LLM Provider">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
+            {/* Provider selector */}
             <div className="space-y-1">
               <Label className="text-sm font-medium">Provider</Label>
               <Select value={provider} onValueChange={handleProviderChange}>
-                <SelectTrigger className="w-full h-8 text-xs">
+                <SelectTrigger className={cn('w-full h-8 text-xs', fieldError('llm_provider', errors.provider) && 'border-red-500 focus-visible:ring-red-500')}>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
                 <SelectContent>
@@ -420,11 +546,12 @@ export default function Settings() {
                   <SelectItem value="ollama">Ollama</SelectItem>
                 </SelectContent>
               </Select>
-              {errors.provider && touched.has('llm_provider') && (
-                <p className="text-sm text-red-400">{errors.provider}</p>
+              {fieldError('llm_provider', errors.provider) && (
+                <p className="text-xs text-red-400">{errors.provider}</p>
               )}
             </div>
 
+            {/* Anthropic API key */}
             {provider === 'anthropic' && (
               <div className="space-y-1">
                 <Label className="text-sm font-medium">API Key</Label>
@@ -433,14 +560,16 @@ export default function Settings() {
                   placeholder="sk-ant-api03-..."
                   value={config.anthropic_key || ''}
                   onChange={(e) => updateField('anthropic_key', e.target.value)}
-                  className="h-8 text-xs"
+                  className={cn('h-8 text-xs', fieldError('anthropic_key', errors.apiKey) && 'border-red-500 focus-visible:ring-red-500')}
                 />
-                {errors.apiKey && touched.has('anthropic_key') && (
-                  <p className="text-sm text-red-400">{errors.apiKey}</p>
+                <p className="text-xs text-muted-foreground">Format: sk-ant-api03-…</p>
+                {fieldError('anthropic_key', errors.apiKey) && (
+                  <p className="text-xs text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
 
+            {/* OpenAI-compatible API key */}
             {showLlmApiKey && (
               <div className="space-y-1">
                 <Label className="text-sm font-medium">API Key</Label>
@@ -450,15 +579,19 @@ export default function Settings() {
                   value={config.llm_api_key || ''}
                   onChange={(e) => updateField('llm_api_key', e.target.value)}
                   disabled={provider === 'ollama'}
-                  className="h-8 text-xs"
+                  className={cn('h-8 text-xs', fieldError('llm_api_key', errors.apiKey) && 'border-red-500 focus-visible:ring-red-500')}
                 />
-                {errors.apiKey && touched.has('llm_api_key') && (
-                  <p className="text-sm text-red-400">{errors.apiKey}</p>
+                {provider !== 'ollama' && (
+                  <p className="text-xs text-muted-foreground">Format: {defaults.keyPlaceholder}</p>
+                )}
+                {fieldError('llm_api_key', errors.apiKey) && (
+                  <p className="text-xs text-red-400">{errors.apiKey}</p>
                 )}
               </div>
             )}
           </div>
 
+          {/* Base URL */}
           {showBaseUrl && (
             <div className="space-y-1">
               <Label className="text-sm font-medium">Base URL</Label>
@@ -466,14 +599,16 @@ export default function Settings() {
                 placeholder={defaults.baseUrl}
                 value={config.llm_base_url || ''}
                 onChange={(e) => updateField('llm_base_url', e.target.value)}
-                className="h-8 text-xs"
+                className={cn('h-8 text-xs', fieldError('llm_base_url', errors.baseUrl) && 'border-red-500 focus-visible:ring-red-500')}
               />
-              {errors.baseUrl && touched.has('llm_base_url') && (
-                <p className="text-sm text-red-400">{errors.baseUrl}</p>
+              <p className="text-xs text-muted-foreground">Must start with http:// or https://</p>
+              {fieldError('llm_base_url', errors.baseUrl) && (
+                <p className="text-xs text-red-400">{errors.baseUrl}</p>
               )}
             </div>
           )}
 
+          {/* Model selectors */}
           <div className="grid grid-cols-2 gap-2">
             <ModelSelect
               label="Fast Model"
@@ -481,7 +616,7 @@ export default function Settings() {
               models={defaults.fastModels}
               value={config.fast_model || ''}
               onChange={(v) => updateField('fast_model', v)}
-              error={errors.fastModel && touched.has('fast_model') ? errors.fastModel : undefined}
+              error={fieldError('fast_model', errors.fastModel)}
             />
             <ModelSelect
               label="Deep Model"
@@ -489,15 +624,16 @@ export default function Settings() {
               models={defaults.deepModels}
               value={config.deep_model || ''}
               onChange={(v) => updateField('deep_model', v)}
-              error={errors.deepModel && touched.has('deep_model') ? errors.deepModel : undefined}
+              error={fieldError('deep_model', errors.deepModel)}
             />
           </div>
         </div>
       </Section>
 
-      {/* Section 2: Performance */}
+      {/* ── Section 2: Performance ── */}
       <Section title="Performance">
         <div className="grid grid-cols-3 gap-2">
+          {/* Max Concurrent */}
           <div className="space-y-1">
             <Label className="text-sm font-medium">Max Concurrent</Label>
             <Input
@@ -507,10 +643,15 @@ export default function Settings() {
               placeholder="10"
               value={config.max_concurrent || 10}
               onChange={(e) => updateField('max_concurrent', parseInt(e.target.value, 10) || 10)}
-              className="h-8 text-xs"
+              className={cn('h-8 text-xs', fieldError('max_concurrent', errors.maxConcurrent) && 'border-red-500 focus-visible:ring-red-500')}
             />
-            <p className="text-sm text-muted-foreground">Parallel LLM calls</p>
+            <p className="text-xs text-muted-foreground">Parallel LLM calls (1–100)</p>
+            {fieldError('max_concurrent', errors.maxConcurrent) && (
+              <p className="text-xs text-red-400">{errors.maxConcurrent}</p>
+            )}
           </div>
+
+          {/* Fast Max Tokens */}
           <div className="space-y-1">
             <Label className="text-sm font-medium">Fast Max Tokens</Label>
             <Input
@@ -520,10 +661,15 @@ export default function Settings() {
               placeholder="4096"
               value={config.fast_max_tokens || 4096}
               onChange={(e) => updateField('fast_max_tokens', parseInt(e.target.value, 10) || 4096)}
-              className="h-8 text-xs"
+              className={cn('h-8 text-xs', fieldError('fast_max_tokens', errors.fastMaxTokens) && 'border-red-500 focus-visible:ring-red-500')}
             />
-            <p className="text-sm text-muted-foreground">Fast model output cap</p>
+            <p className="text-xs text-muted-foreground">Fast model output cap (256–65,536)</p>
+            {fieldError('fast_max_tokens', errors.fastMaxTokens) && (
+              <p className="text-xs text-red-400">{errors.fastMaxTokens}</p>
+            )}
           </div>
+
+          {/* Deep Max Tokens */}
           <div className="space-y-1">
             <Label className="text-sm font-medium">Deep Max Tokens</Label>
             <Input
@@ -533,14 +679,17 @@ export default function Settings() {
               placeholder="8192"
               value={config.deep_max_tokens || 8192}
               onChange={(e) => updateField('deep_max_tokens', parseInt(e.target.value, 10) || 8192)}
-              className="h-8 text-xs"
+              className={cn('h-8 text-xs', fieldError('deep_max_tokens', errors.deepMaxTokens) && 'border-red-500 focus-visible:ring-red-500')}
             />
-            <p className="text-sm text-muted-foreground">Deep model output cap</p>
+            <p className="text-xs text-muted-foreground">Deep model output cap (256–65,536)</p>
+            {fieldError('deep_max_tokens', errors.deepMaxTokens) && (
+              <p className="text-xs text-red-400">{errors.deepMaxTokens}</p>
+            )}
           </div>
         </div>
       </Section>
 
-      {/* Section 3: Memories Server */}
+      {/* ── Section 3: Memories Server ── */}
       <Section title="Memories Server">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -550,10 +699,11 @@ export default function Settings() {
                 placeholder="http://localhost:8900"
                 value={config.memories_url || ''}
                 onChange={(e) => updateField('memories_url', e.target.value)}
-                className="h-8 text-xs"
+                className={cn('h-8 text-xs', fieldError('memories_url', errors.memoriesUrl) && 'border-red-500 focus-visible:ring-red-500')}
               />
-              {errors.memoriesUrl && touched.has('memories_url') && (
-                <p className="text-sm text-red-400">{errors.memoriesUrl}</p>
+              <p className="text-xs text-muted-foreground">Must start with http:// or https://</p>
+              {fieldError('memories_url', errors.memoriesUrl) && (
+                <p className="text-xs text-red-400">{errors.memoriesUrl}</p>
               )}
             </div>
             <div className="space-y-1">
@@ -575,29 +725,34 @@ export default function Settings() {
             {connectionStatus === 'unreachable' && (
               <>
                 <Badge variant="destructive" className="text-xs">Unreachable</Badge>
-                {connectionError && <span className="text-sm text-red-400">{connectionError}</span>}
+                {connectionError && <span className="text-xs text-red-400">{connectionError}</span>}
               </>
             )}
           </div>
         </div>
       </Section>
 
-      {/* Section 4: Integrations */}
+      {/* ── Section 4: Integrations ── */}
       <Section title="Integrations">
         <div className="space-y-3">
           {/* GitHub */}
-          <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 shrink-0 rounded-full',
-              config.github_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-            )} />
-            <Label className="w-24 shrink-0 text-sm font-medium">GitHub</Label>
-            <Input
-              type="password"
-              placeholder="ghp_... (optional)"
-              value={config.github_token || ''}
-              onChange={(e) => updateField('github_token', e.target.value)}
-              className="flex-1 h-8 text-xs"
-            />
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full',
+                config.github_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+              )} />
+              <Label className="w-24 shrink-0 text-sm font-medium">GitHub</Label>
+              <Input
+                type="password"
+                placeholder="ghp_... (optional)"
+                value={config.github_token || ''}
+                onChange={(e) => updateField('github_token', e.target.value)}
+                className={cn('flex-1 h-8 text-xs', fieldError('github_token', errors.githubToken) && 'border-red-500 focus-visible:ring-red-500')}
+              />
+            </div>
+            {fieldError('github_token', errors.githubToken) && (
+              <p className="text-xs text-red-400 ml-[calc(0.5rem+8px+0.75rem+6rem)]">{errors.githubToken}</p>
+            )}
           </div>
 
           {/* Jira */}
@@ -611,16 +766,24 @@ export default function Settings() {
                 placeholder="https://your-org.atlassian.net"
                 value={config.jira_base_url || ''}
                 onChange={(e) => updateField('jira_base_url', e.target.value)}
-                className="flex-1 h-8 text-xs"
+                className={cn('flex-1 h-8 text-xs', fieldError('jira_base_url', errors.jiraBaseUrl) && 'border-red-500 focus-visible:ring-red-500')}
               />
             </div>
+            {fieldError('jira_base_url', errors.jiraBaseUrl) && (
+              <p className="text-xs text-red-400 ml-[calc(0.5rem+8px+0.75rem+6rem)]">{errors.jiraBaseUrl}</p>
+            )}
             <div className="ml-[calc(0.5rem+8px+0.75rem+6rem)] grid grid-cols-2 gap-2">
-              <Input
-                placeholder="user@company.com"
-                value={config.jira_email || ''}
-                onChange={(e) => updateField('jira_email', e.target.value)}
-                className="h-8 text-xs"
-              />
+              <div className="space-y-1">
+                <Input
+                  placeholder="user@company.com"
+                  value={config.jira_email || ''}
+                  onChange={(e) => updateField('jira_email', e.target.value)}
+                  className={cn('h-8 text-xs', fieldError('jira_email', errors.jiraEmail) && 'border-red-500 focus-visible:ring-red-500')}
+                />
+                {fieldError('jira_email', errors.jiraEmail) && (
+                  <p className="text-xs text-red-400">{errors.jiraEmail}</p>
+                )}
+              </div>
               <Input
                 type="password"
                 placeholder="API Token (optional)"
@@ -632,51 +795,73 @@ export default function Settings() {
           </div>
 
           {/* Linear */}
-          <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 shrink-0 rounded-full',
-              config.linear_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-            )} />
-            <Label className="w-24 shrink-0 text-sm font-medium">Linear</Label>
-            <Input
-              type="password"
-              placeholder="lin_api_... (optional)"
-              value={config.linear_token || ''}
-              onChange={(e) => updateField('linear_token', e.target.value)}
-              className="flex-1 h-8 text-xs"
-            />
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full',
+                config.linear_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+              )} />
+              <Label className="w-24 shrink-0 text-sm font-medium">Linear</Label>
+              <Input
+                type="password"
+                placeholder="lin_api_... (optional)"
+                value={config.linear_token || ''}
+                onChange={(e) => updateField('linear_token', e.target.value)}
+                className={cn('flex-1 h-8 text-xs', fieldError('linear_token', errors.linearToken) && 'border-red-500 focus-visible:ring-red-500')}
+              />
+            </div>
+            {fieldError('linear_token', errors.linearToken) && (
+              <p className="text-xs text-red-400 ml-[calc(0.5rem+8px+0.75rem+6rem)]">{errors.linearToken}</p>
+            )}
           </div>
 
           {/* Notion */}
-          <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 shrink-0 rounded-full',
-              config.notion_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-            )} />
-            <Label className="w-24 shrink-0 text-sm font-medium">Notion</Label>
-            <Input
-              type="password"
-              placeholder="ntn_... (optional)"
-              value={config.notion_token || ''}
-              onChange={(e) => updateField('notion_token', e.target.value)}
-              className="flex-1 h-8 text-xs"
-            />
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full',
+                config.notion_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+              )} />
+              <Label className="w-24 shrink-0 text-sm font-medium">Notion</Label>
+              <Input
+                type="password"
+                placeholder="ntn_... (optional)"
+                value={config.notion_token || ''}
+                onChange={(e) => updateField('notion_token', e.target.value)}
+                className={cn('flex-1 h-8 text-xs', fieldError('notion_token', errors.notionToken) && 'border-red-500 focus-visible:ring-red-500')}
+              />
+            </div>
+            {fieldError('notion_token', errors.notionToken) && (
+              <p className="text-xs text-red-400 ml-[calc(0.5rem+8px+0.75rem+6rem)]">{errors.notionToken}</p>
+            )}
           </div>
 
           {/* Slack */}
-          <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 shrink-0 rounded-full',
-              config.slack_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-            )} />
-            <Label className="w-24 shrink-0 text-sm font-medium">Slack</Label>
-            <Input
-              type="password"
-              placeholder="xoxb-... (optional)"
-              value={config.slack_token || ''}
-              onChange={(e) => updateField('slack_token', e.target.value)}
-              className="flex-1 h-8 text-xs"
-            />
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full',
+                config.slack_token ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+              )} />
+              <Label className="w-24 shrink-0 text-sm font-medium">Slack</Label>
+              <Input
+                type="password"
+                placeholder="xoxb-... (optional)"
+                value={config.slack_token || ''}
+                onChange={(e) => updateField('slack_token', e.target.value)}
+                className={cn('flex-1 h-8 text-xs', fieldError('slack_token', errors.slackToken) && 'border-red-500 focus-visible:ring-red-500')}
+              />
+            </div>
+            {fieldError('slack_token', errors.slackToken) && (
+              <p className="text-xs text-red-400 ml-[calc(0.5rem+8px+0.75rem+6rem)]">{errors.slackToken}</p>
+            )}
           </div>
         </div>
       </Section>
+
+      {/* ── Bottom Save button ── */}
+      <div className="flex justify-end pb-4">
+        <Button onClick={save} disabled={saving} size="lg">
+          {saving ? 'Saving...' : 'Save Settings'}
+        </Button>
+      </div>
     </div>
   )
 }

@@ -1,0 +1,48 @@
+<!-- BEGIN CARTO INDEX -->
+Project: carto
+
+Architecture:
+CARTO is a codebase intelligence platform designed to index, analyze, and semantically query software projects. The system follows a self-contained, single-binary deployment architecture where a Go backend serves as the primary runtime, embedding a React single-page application (the 'web' module) directly into its compiled binary via Go's embed package. The frontend provides a comprehensive management interface for creating and managing projects, configuring data sources (local folders, potentially remote repositories), running indexing operations against codebases, performing semantic queries over indexed code, configuring LLM providers and integrations, and monitoring system health. The React SPA communicates with the Go backend exclusively through a centralized API client (`api.ts`) that handles authentication, RESTful data fetching, and Server-Sent Events (SSE) for real-time progress streaming during indexing operations. The root Go module (`github.com/divyekant/carto`) serves as the main application package that orchestrates the backend services—likely including an HTTP API server, indexing pipeline, vector/semantic search engine, LLM integration layer, and configuration management. The 'codex' module likely represents the core intelligence engine responsible for code parsing, embedding generation, and semantic indexing logic that powers the platform's code understanding capabilities. The overall business purpose is to provide developers and teams with an intelligent, self-hosted tool that can deeply index codebases and answer natural-language queries about code structure, patterns, and relationships using LLM-powered semantic search.
+
+Modules:
+- web (): This module is the React-based single-page application frontend for the CARTO codebase intelligence platform. It provides a complete web UI for managing projects, running indexing operations, querying indexed codebases, configuring LLM providers and integrations, and monitoring system health. The compiled SPA is embedded into the Go binary via embed.go for self-contained deployment.
+- github.com/divyekant/carto (): 
+- codex (): 
+
+Patterns:
+- Single-binary deployment: The React SPA is compiled via Vite and embedded into the Go binary using Go's embed package, eliminating the need for separate frontend hosting
+- Centralized API client pattern: All frontend-backend communication flows through a single api.ts module that encapsulates authentication headers, base URL resolution, error handling, and both REST and SSE protocols
+- Authentication guard pattern: An AuthGuard component wraps all routes to validate tokens against the backend API before rendering protected content
+- Shell/Layout composition: The app follows a hierarchical composition of ThemeProvider → AuthGuard → ErrorBoundary → Layout → Page routes, establishing clear cross-cutting concern boundaries
+- Shadcn/ui design system: UI primitives are built on the shadcn/ui component library pattern with Tailwind CSS, using a cn() utility (clsx + tailwind-merge) for conditional class name composition
+- Page-level data fetching: Each page component is responsible for its own data fetching lifecycle via the shared API client, rather than using a global state management library
+- Server-Sent Events (SSE) for real-time progress: Long-running indexing operations stream progress updates from backend to frontend via SSE, displayed through ProgressBar components
+- Feature component encapsulation: Domain-specific components (FolderPicker, SourcesEditor, QueryResult) encapsulate both UI rendering and API interaction logic for their respective domains
+- React Router SPA routing: Client-side routing maps URL paths to page components within a shared Layout shell
+- Go module organization: The project uses Go modules with the root module serving as the main application entry point and sub-packages/modules for distinct capabilities (web frontend, codex intelligence engine)
+- Theme management via React Context: A ThemeProvider component with useTheme hook provides application-wide dark/light theme toggling using React context
+- Error boundary pattern: React error boundaries wrap route content to catch and gracefully handle rendering errors without crashing the entire application
+- Card-based dashboard layout: The Dashboard and other pages use a Section/Card compositional pattern for organizing content into visually distinct, scannable regions
+
+Business Domains:
+- Application Shell: Provides the top-level application structure including routing, authentication, theming, error boundaries, and the main navigation layout
+- Pages: Implements the main application views: dashboard overview, project indexing, semantic querying, project details with source management, application settings, and about/help information
+- Feature Components: Reusable domain-specific components that encapsulate business logic for folder browsing, progress display, project cards, query results, data source editing, and content sections
+- UI Primitives: Shadcn/ui-based design system components providing consistent, accessible, and themeable building blocks (buttons, cards, inputs, selects, tables, tabs, tooltips, etc.)
+- Infrastructure & Utilities: Shared API client with authentication handling, utility functions for class name merging, and the Go embed bridge that compiles the SPA into the server binary
+- Build & Configuration: Project configuration for Vite bundling, TypeScript compilation, ESLint linting, shadcn component library, and package dependency management
+
+Working with the Carto Index:
+This project is indexed by Carto. Query before editing, write back after changes.
+
+Query before editing (search for the function/file you are changing):
+  curl -s -X POST "$MEMORIES_URL/search" -H "Content-Type: application/json" -H "X-API-Key: $MEMORIES_API_KEY" -d '{"query": "SEARCH_TERM", "k": 5, "hybrid": true, "source_prefix": "carto/carto/"}'
+
+Write back after changes (use atom format: name (kind) in file:line-line | Summary | Imports | Exports):
+  curl -s -X POST "$MEMORIES_URL/memory/add" -H "Content-Type: application/json" -H "X-API-Key: $MEMORIES_API_KEY" -d '{"text": "SUMMARY", "source": "carto/carto/MODULE/layer:atoms"}'
+
+Layers: atoms (code units), wiring (dependencies), patterns (conventions).
+Write back after: new functions, changed signatures, bug fixes, refactors, deletions.
+Follow the Patterns section above when writing new code.
+
+<!-- END CARTO INDEX -->

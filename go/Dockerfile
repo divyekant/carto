@@ -44,7 +44,18 @@ COPY --from=builder /carto /usr/local/bin/carto
 # Default projects directory (mount your projects here)
 RUN mkdir -p /projects
 
+# Run as non-root user for defence-in-depth security.
+# carto only needs access to /projects (volume mount) and network egress.
+RUN addgroup -S carto && adduser -S carto -G carto && chown carto:carto /projects
+USER carto
+
 EXPOSE 8950
+
+# Container health check for Docker Compose and Kubernetes readiness probes.
+# The /api/health endpoint bypasses authentication so orchestrators can probe
+# liveness without a token, even when CARTO_SERVER_TOKEN is configured.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:8950/api/health || exit 1
 
 # Configure via docker-compose.yml, .env, or docker run -e flags.
 # See .env.example for all available variables.
