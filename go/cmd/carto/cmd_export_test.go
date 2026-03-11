@@ -134,20 +134,41 @@ func TestExportCmd_LayerFilter(t *testing.T) {
 	var capturedSource string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedSource = r.URL.Query().Get("source")
-		json.NewEncoder(w).Encode(map[string]any{"memories": []any{}})
+		json.NewEncoder(w).Encode(map[string]any{
+			"memories": []map[string]any{
+				{"id": 1, "text": "atom", "source": "carto/myapp/api/layer:atoms"},
+				{"id": 2, "text": "history", "source": "carto/myapp/api/layer:history"},
+			},
+		})
 	}))
 	defer srv.Close()
 
 	t.Setenv("MEMORIES_URL", srv.URL)
 
 	cmd := buildRootCmd()
-	cmd.SetOut(new(strings.Builder))
+	out := new(strings.Builder)
+	cmd.SetOut(out)
 	cmd.SetErr(new(strings.Builder))
 	cmd.SetArgs([]string{"export", "--project", "myapp", "--layer", "atoms", "--pretty"})
 
-	cmd.Execute()
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export command failed: %v", err)
+	}
 
-	if !strings.Contains(capturedSource, "layer:atoms") {
-		t.Errorf("expected source filter to contain 'layer:atoms', got %q", capturedSource)
+	if capturedSource != "carto/myapp/" {
+		t.Errorf("expected project source prefix, got %q", capturedSource)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 exported NDJSON line, got %d: %q", len(lines), out.String())
+	}
+
+	var entry exportEntry
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Fatalf("failed to parse NDJSON line: %v", err)
+	}
+	if entry.Source != "carto/myapp/api/layer:atoms" {
+		t.Errorf("expected atoms-only export, got %q", entry.Source)
 	}
 }

@@ -37,25 +37,21 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		store := storage.NewStore(memoriesClient, project)
 
 		storageTier := storage.Tier(tier)
-		results, err := store.RetrieveByTier(query, storageTier)
+		results, err := store.SearchByTier(query, storageTier, count)
 		if err != nil {
-			return fmt.Errorf("retrieve by tier: %w", err)
+			return fmt.Errorf("search by tier: %w", err)
 		}
 
 		writeEnvelopeHuman(cmd, results, nil, func() {
 			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, gold, project, tier, reset)
-
-			for layer, entries := range results {
-				if len(entries) == 0 {
-					continue
-				}
-				fmt.Printf("%s%s[%s]%s\n", bold, gold, layer, reset)
-				for _, entry := range entries {
-					snippet := truncateText(entry.Text, 200)
-					fmt.Printf("  %ssource:%s %s\n", gold, reset, entry.Source)
-					fmt.Printf("  %sscore:%s  %.4f\n", gold, reset, entry.Score)
-					fmt.Printf("  %s\n\n", snippet)
-				}
+			if len(results) == 0 {
+				fmt.Println("  No results found.")
+				return
+			}
+			for i, entry := range results {
+				snippet := truncateText(entry.Text, 200)
+				fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, gold, reset, entry.Source, gold, reset, entry.Score)
+				fmt.Printf("   %s\n\n", snippet)
 			}
 		})
 		return nil

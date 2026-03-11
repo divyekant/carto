@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { ApiError, apiFetchRaw } from '@/lib/api'
 
 interface AuthGuardProps {
   children: ReactNode
@@ -30,21 +31,17 @@ export function AuthGuard({ children }: AuthGuardProps) {
   useEffect(() => {
     async function probe() {
       try {
-        // Try a protected endpoint with the stored token (if any).
-        // /api/health bypasses auth so we probe /api/projects instead.
-        const storedToken = localStorage.getItem('carto_token') ?? ''
-        const res = await fetch('/api/projects', {
-          headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : {},
-        })
-        if (res.status === 401) {
-          // Auth is enabled and our token (if any) is invalid.
+        // Probe a protected endpoint without triggering the global 401 reload
+        // path. AuthGuard needs to decide whether to show the unlock screen.
+        await apiFetchRaw('/projects', undefined, { skipUnauthorizedRedirect: true })
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
           localStorage.removeItem('carto_token')
           setToken('')
           setLocked(true)
+        } else {
+          // Network error — assume no auth required (server may be starting).
         }
-        // 200, 404, 500 etc → auth either not required or token is valid.
-      } catch {
-        // Network error — assume no auth required (server may be starting).
       } finally {
         setChecked(true)
       }
@@ -62,18 +59,19 @@ export function AuthGuard({ children }: AuthGuardProps) {
     setError('')
     try {
       // Validate the token against a protected endpoint.
-      const res = await fetch('/api/projects', {
+      await apiFetchRaw('/projects', {
         headers: { Authorization: `Bearer ${token}` },
+      }, {
+        skipUnauthorizedRedirect: true,
       })
-      if (res.ok || res.status !== 401) {
-        // Token accepted (or endpoint returned a non-auth error — still authenticated).
-        localStorage.setItem('carto_token', token)
-        setLocked(false)
-      } else {
+      localStorage.setItem('carto_token', token)
+      setLocked(false)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
         setError('Invalid token — please try again')
+      } else {
+        setError('Network error — ensure the Carto server is running')
       }
-    } catch {
-      setError('Network error — ensure the Carto server is running')
     } finally {
       setLoading(false)
     }

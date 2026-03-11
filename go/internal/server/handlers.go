@@ -112,6 +112,28 @@ type queryResultItem struct {
 	Layer  string  `json:"layer,omitempty"`
 }
 
+func queryItemsFromResults(results []storage.SearchResult) []queryResultItem {
+	items := make([]queryResultItem, 0, len(results))
+	for _, sr := range results {
+		layer := layerFromSource(sr.Source)
+		items = append(items, queryResultItem{
+			Text:   sr.Text,
+			Source: sr.Source,
+			Score:  sr.Score,
+			Layer:  layer,
+		})
+	}
+	return items
+}
+
+func layerFromSource(source string) string {
+	idx := strings.LastIndex(source, "/layer:")
+	if idx == -1 {
+		return ""
+	}
+	return source[idx+len("/layer:"):]
+}
+
 // handleQuery searches the memories index. If a project is specified, it uses
 // tier-based retrieval and flattens the results. Otherwise it performs a
 // free-form hybrid search across all projects.
@@ -134,59 +156,38 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		req.K = 10
 	}
 
-	// Search with optional project scoping via source prefix.
-	sourcePrefix := ""
-	opts := storage.SearchOptions{
-		K:      req.K,
-		Hybrid: true,
-	}
-	if req.Project != "" {
-		sourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
-		opts.SourcePrefix = sourcePrefix
-		// Request extra results so we have enough after filtering.
-		opts.K = req.K * 3
+	_, ok := storage.LayersForTier(storage.Tier(req.Tier))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid tier")
+		return
 	}
 
-	results, err := s.memoriesClient.Search(req.Text, opts)
+	if req.Project != "" {
+		store := storage.NewStore(s.memoriesClient, req.Project)
+		results, err := store.SearchByTier(req.Text, storage.Tier(req.Tier), req.K)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		items := queryItemsFromResults(results)
+		if items == nil {
+			items = []queryResultItem{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": items})
+		return
+	}
+
+	results, err := s.memoriesClient.Search(req.Text, storage.SearchOptions{
+		K:      req.K,
+		Hybrid: true,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	var items []queryResultItem
-	for _, sr := range results {
-		if sourcePrefix != "" && !strings.HasPrefix(sr.Source, sourcePrefix) {
-			continue
-		}
-		items = append(items, queryResultItem{
-			Text:   sr.Text,
-			Source: sr.Source,
-			Score:  sr.Score,
-		})
-		if len(items) >= req.K {
-			break
-		}
-	}
-
-	// Fallback: if search returned no project-matching results, use ListBySource
-	// to retrieve all memories for the project. This works around search APIs
-	// that don't support source-prefix filtering.
-	if len(items) == 0 && sourcePrefix != "" {
-		listed, listErr := s.memoriesClient.ListBySource(sourcePrefix, req.K*5, 0)
-		if listErr == nil {
-			for _, sr := range listed {
-				items = append(items, queryResultItem{
-					Text:   sr.Text,
-					Source: sr.Source,
-					Score:  sr.Score,
-				})
-				if len(items) >= req.K {
-					break
-				}
-			}
-		}
-	}
-
+	items := queryItemsFromResults(results)
 	if items == nil {
 		items = []queryResultItem{}
 	}
@@ -482,13 +483,13 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	result, err := pipeline.Run(pipeline.Config{
-		Ctx:               run.Ctx,
-		ProjectName:       projectName,
-		RootPath:          absPath,
-		LLMClient:         llmClient,
-		MemoriesClient:    memoriesClient,
-		SourceRegistry:    srcRegistry,
-		MaxWorkers:        cfg.MaxConcurrent,
+		Ctx:            run.Ctx,
+		ProjectName:    projectName,
+		RootPath:       absPath,
+		LLMClient:      llmClient,
+		MemoriesClient: memoriesClient,
+		SourceRegistry: srcRegistry,
+		MaxWorkers:     cfg.MaxConcurrent,
 		ProgressFn: func(phase string, done, total int) {
 			run.SendProgress(phase, done, total)
 		},
@@ -899,7 +900,7 @@ func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
 		}
 		started++
 		go func(run *IndexRun, name, path string) {
-			sem <- struct{}{} // acquire
+			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 			req := indexRequest{Path: path, Project: name}
 			s.runIndex(run, name, path, req, cfg)
@@ -917,7 +918,7 @@ func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
 // sourcesResponse is the JSON shape returned by GET /api/projects/{name}/sources.
 type sourcesResponse struct {
 	Sources     map[string]map[string]string `json:"sources"`
-	Credentials map[string]bool             `json:"credentials"`
+	Credentials map[string]bool              `json:"credentials"`
 }
 
 // handleGetSources returns the parsed .carto/sources.yaml for a project
@@ -969,16 +970,16 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 // metricsResponse is the JSON shape returned by GET /api/metrics.
 // Fields align with common B2B SaaS observability schemas (Datadog, Prometheus).
 type metricsResponse struct {
-	Version        string  `json:"version"`
-	UptimeSeconds  float64 `json:"uptime_seconds"`
-	GoRoutines     int     `json:"go_routines"`
-	MemAllocMB     float64 `json:"mem_alloc_mb"`
-	MemSysMB       float64 `json:"mem_sys_mb"`
-	GCCycles       uint32  `json:"gc_cycles"`
-	ActiveRuns     int     `json:"active_index_runs"`
-	TotalRequests  int64   `json:"total_requests"`
-	ProjectsDir    string  `json:"projects_dir,omitempty"`
-	AuthEnabled    bool    `json:"auth_enabled"`
+	Version       string  `json:"version"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+	GoRoutines    int     `json:"go_routines"`
+	MemAllocMB    float64 `json:"mem_alloc_mb"`
+	MemSysMB      float64 `json:"mem_sys_mb"`
+	GCCycles      uint32  `json:"gc_cycles"`
+	ActiveRuns    int     `json:"active_index_runs"`
+	TotalRequests int64   `json:"total_requests"`
+	ProjectsDir   string  `json:"projects_dir,omitempty"`
+	AuthEnabled   bool    `json:"auth_enabled"`
 }
 
 // aboutResponse is the JSON shape returned by GET /api/about.

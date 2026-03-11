@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { ProgressBar } from '@/components/ProgressBar'
 import { Section } from '@/components/Section'
+import { apiFetch } from '@/lib/api'
+import { connectSSE, type SSEConnection } from '@/lib/sse'
 import { cn } from '@/lib/utils'
 
 type PageState = 'idle' | 'starting' | 'running' | 'complete' | 'error' | 'stopped'
@@ -34,6 +36,13 @@ interface LogEntry {
   timestamp: number
 }
 
+interface RunStatus {
+  project: string
+  status: string
+  result?: CompleteData
+  error?: string
+}
+
 export default function IndexRun() {
   const [searchParams] = useSearchParams()
   const [state, setState] = useState<PageState>('idle')
@@ -50,7 +59,8 @@ export default function IndexRun() {
   const [result, setResult] = useState<CompleteData | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const eventSourceRef = useRef<EventSource | null>(null)
+  const streamRef = useRef<SSEConnection | null>(null)
+  const terminalEventRef = useRef(false)
   const stateRef = useRef<PageState>('idle')
   const logEndRef = useRef<HTMLDivElement>(null)
   const [recentRuns, setRecentRuns] = useState<Array<{
@@ -70,7 +80,7 @@ export default function IndexRun() {
   }, [logs])
 
   useEffect(() => {
-    return () => { eventSourceRef.current?.close() }
+    return () => { streamRef.current?.close() }
   }, [])
 
   useEffect(() => {
@@ -79,35 +89,28 @@ export default function IndexRun() {
   }, [searchParams])
 
   useEffect(() => {
-    fetch('/api/projects/runs')
-      .then(r => r.json())
-      .then((runs: Array<{ project: string; status: string; result?: CompleteData; error?: string }>) => {
-        if (Array.isArray(runs)) setRecentRuns(runs)
-        if (runs.length > 0) {
-          const lastRun = runs[0]
-          if (lastRun.status === 'running') {
-            setProjectName(lastRun.project)
-            setPageState('running')
-            setLogs([{ level: 'info', message: 'Reconnecting to active run...', timestamp: Date.now() }])
-            connectSSE(lastRun.project)
-          } else if (lastRun.status === 'complete' && lastRun.result) {
-            setResult(lastRun.result)
-            setPageState('complete')
-          } else if (lastRun.status === 'error' && lastRun.error) {
-            setErrorMsg(lastRun.error)
-            setPageState('error')
-          } else if (lastRun.status === 'stopped') {
-            setPageState('stopped')
-          }
+    apiFetch<RunStatus[]>('/projects/runs')
+      .then((runs) => {
+        if (Array.isArray(runs)) {
+          setRecentRuns(runs)
         }
+        const activeRun = runs.find((run) => run.status === 'running')
+        if (!activeRun) {
+          return
+        }
+        setProjectName(activeRun.project)
+        setPageState('running')
+        setLogs([{ level: 'info', message: 'Reconnecting to active run...', timestamp: Date.now() }])
+        openProgressStream(activeRun.project)
       })
       .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function reset() {
-    eventSourceRef.current?.close()
-    eventSourceRef.current = null
+    streamRef.current?.close()
+    streamRef.current = null
+    terminalEventRef.current = false
     setPageState('idle')
     setProgress({ phase: '', done: 0, total: 0 })
     setResult(null)
@@ -135,89 +138,88 @@ export default function IndexRun() {
       }
       if (module.trim()) body.module = module.trim()
 
-      const res = await fetch('/api/projects/index', {
+      const data = await apiFetch<{ project: string }>('/projects/index', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-
-      const data = await res.json()
       const name = data.project
       setProjectName(name)
 
       setPageState('running')
       toast.success('Indexing started')
-      connectSSE(name)
+      openProgressStream(name)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err))
       setPageState('error')
     }
   }
 
-  function connectSSE(projectName: string) {
-    const es = new EventSource(`/api/projects/${encodeURIComponent(projectName)}/progress`)
-    eventSourceRef.current = es
+  function openProgressStream(projectName: string) {
+    streamRef.current?.close()
+    terminalEventRef.current = false
 
-    es.addEventListener('progress', (e) => {
-      const data: ProgressData = JSON.parse(e.data)
-      setProgress(data)
-    })
-
-    es.addEventListener('log', (e) => {
-      if (e instanceof MessageEvent && e.data) {
-        const data = JSON.parse(e.data)
+    const stream = connectSSE(`/projects/${encodeURIComponent(projectName)}/progress`, {
+      progress: (payload) => {
+        const data: ProgressData = JSON.parse(payload)
+        setProgress(data)
+      },
+      log: (payload) => {
+        const data = JSON.parse(payload) as { level: string; message: string }
         setLogs(prev => [...prev, { level: data.level, message: data.message, timestamp: Date.now() }])
-      }
-    })
-
-    es.addEventListener('complete', (e) => {
-      const data: CompleteData = JSON.parse(e.data)
-      setResult(data)
-      setLogs(prev => [...prev, { level: 'info', message: 'Indexing complete!', timestamp: Date.now() }])
-      setPageState('complete')
-      es.close()
-    })
-
-    es.addEventListener('pipeline_error', (e) => {
-      if (e instanceof MessageEvent && e.data) {
-        const data = JSON.parse(e.data)
+      },
+      complete: (payload) => {
+        terminalEventRef.current = true
+        const data: CompleteData = JSON.parse(payload)
+        setResult(data)
+        setLogs(prev => [...prev, { level: 'info', message: 'Indexing complete!', timestamp: Date.now() }])
+        setPageState('complete')
+        stream.close()
+      },
+      pipeline_error: (payload) => {
+        terminalEventRef.current = true
+        const data = JSON.parse(payload) as { message?: string }
         const msg = data.message || 'Unknown pipeline error'
         setErrorMsg(msg)
         toast.error(msg)
         setLogs(prev => [...prev, { level: 'error', message: msg, timestamp: Date.now() }])
-      }
-      setPageState('error')
-      es.close()
+        setPageState('error')
+        stream.close()
+      },
+      stopped: () => {
+        terminalEventRef.current = true
+        setLogs(prev => [...prev, { level: 'warn', message: 'Indexing stopped by user', timestamp: Date.now() }])
+        setPageState('stopped')
+        setStopping(false)
+        toast('Indexing stopped')
+        stream.close()
+      },
+    }, {
+      onError: () => {
+        if (stateRef.current === 'running') {
+          terminalEventRef.current = true
+          setErrorMsg('Connection to progress stream lost')
+          toast.error('Connection to progress stream lost')
+          setPageState('error')
+        }
+      },
     })
 
-    es.addEventListener('stopped', () => {
-      setLogs(prev => [...prev, { level: 'warn', message: 'Indexing stopped by user', timestamp: Date.now() }])
-      setPageState('stopped')
-      setStopping(false)
-      toast('Indexing stopped')
-      es.close()
-    })
-
-    es.onerror = () => {
-      if (stateRef.current === 'running') {
+    stream.done.finally(() => {
+      if (!terminalEventRef.current && stateRef.current === 'running') {
         setErrorMsg('Connection to progress stream lost')
         toast.error('Connection to progress stream lost')
         setPageState('error')
       }
-      es.close()
-    }
+    })
+
+    streamRef.current = stream
   }
 
   async function stopIndexing() {
     if (!projectName) return
     setStopping(true)
     try {
-      await fetch(`/api/projects/${encodeURIComponent(projectName)}/stop`, { method: 'POST' })
+      await apiFetch(`/projects/${encodeURIComponent(projectName)}/stop`, { method: 'POST' })
     } catch {
       setStopping(false)
       toast.error('Failed to stop indexing')

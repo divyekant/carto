@@ -148,8 +148,14 @@ func (s *Server) handleTestMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	testURL := config.ResolveURL(req.URL)
+	apiKey := req.APIKey
+	if apiKey == "" {
+		s.cfgMu.RLock()
+		apiKey = s.cfg.MemoriesKey
+		s.cfgMu.RUnlock()
+	}
 
-	client := storage.NewMemoriesClient(testURL, req.APIKey)
+	client := storage.NewMemoriesClient(testURL, apiKey)
 	healthy, err := client.Health()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"connected": false, "error": err.Error()})

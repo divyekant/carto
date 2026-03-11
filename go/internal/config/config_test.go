@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -232,5 +233,47 @@ func TestLoadConfig_CORSOriginsFromEnv(t *testing.T) {
 	cfg := Load()
 	if cfg.CORSOrigins != "https://myapp.com,https://dashboard.example.com" {
 		t.Errorf("expected CORSOrigins from env, got %q", cfg.CORSOrigins)
+	}
+}
+
+func TestPersistedConfig_RetainsClearedOptionalValues(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-github-token")
+	t.Setenv("JIRA_BASE_URL", "https://jira.example.com")
+
+	originalConfigPath := ConfigPath
+	ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	defer func() { ConfigPath = originalConfigPath }()
+
+	if err := Save(Config{
+		MemoriesURL:   "http://localhost:8900",
+		FastModel:     "claude-haiku-4-5-20251001",
+		DeepModel:     "claude-opus-4-6",
+		MaxConcurrent: 10,
+		FastMaxTokens: 4096,
+		DeepMaxTokens: 8192,
+		LLMProvider:   "anthropic",
+		GitHubToken:   "",
+		JiraBaseURL:   "",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	data, err := os.ReadFile(ConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), `"github_token": ""`) {
+		t.Fatalf("saved config omitted cleared github_token: %s", data)
+	}
+	if !strings.Contains(string(data), `"jira_base_url": ""`) {
+		t.Fatalf("saved config omitted cleared jira_base_url: %s", data)
+	}
+
+	cfg := Load()
+	if cfg.GitHubToken != "" {
+		t.Fatalf("Load() github_token = %q, want empty string", cfg.GitHubToken)
+	}
+	if cfg.JiraBaseURL != "" {
+		t.Fatalf("Load() jira_base_url = %q, want empty string", cfg.JiraBaseURL)
 	}
 }

@@ -12,6 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import { QueryResult } from '@/components/QueryResult'
 import { Section } from '@/components/Section'
+import { apiFetch } from '@/lib/api'
 
 interface Project {
   name: string
@@ -22,6 +23,7 @@ interface Result {
   text: string
   score: number
   source: string
+  layer?: string
 }
 
 const QUICK_QUERIES = [
@@ -44,14 +46,13 @@ export default function Query() {
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/projects')
-      .then(r => r.json())
-      .then(data => {
-        const projs = (Array.isArray(data) ? data : data.projects || []) as Project[]
-        setProjects(projs)
-        if (projs.length > 0) setProject(projs[0].name)
+    apiFetch<Project[]>('/projects')
+      .then((projectList) => {
+        setProjects(projectList)
+        if (projectList.length > 0) setProject(projectList[0].name)
       })
       .catch(console.error)
   }, [])
@@ -60,19 +61,18 @@ export default function Query() {
     if (!text.trim() || !project) return
     setSearching(true)
     setResults([])
+    setError('')
     setVisibleCount(PAGE_SIZE)
     setSearched(false)
 
     try {
-      const res = await fetch('/api/query', {
+      const data = await apiFetch<{ results?: Result[] }>('/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: text.trim(), project, tier, k }),
       })
-      const data = await res.json()
       setResults(data.results || [])
     } catch (err) {
-      console.error(err)
+      setError(err instanceof Error ? err.message : 'Search failed')
     } finally {
       setSearching(false)
       setSearched(true)
@@ -192,7 +192,12 @@ export default function Query() {
 
       {searched && results.length === 0 && (
         <Section className="mt-6">
-          <p className="text-sm text-muted-foreground text-center py-8">No results found. Try a different query or project.</p>
+          <p className={cn(
+            'text-sm text-center py-8',
+            error ? 'text-red-400' : 'text-muted-foreground',
+          )}>
+            {error || 'No results found. Try a different query or project.'}
+          </p>
         </Section>
       )}
     </div>

@@ -265,6 +265,56 @@ func TestQueryEndpoint(t *testing.T) {
 	}
 }
 
+func TestQueryEndpoint_ProjectTierFiltersLayers(t *testing.T) {
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/search" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"results": []map[string]any{
+					{"id": 1, "text": "atom result", "score": 0.99, "source": "carto/myproj/auth/layer:atoms"},
+					{"id": 2, "text": "zones result", "score": 0.98, "source": "carto/myproj/auth/layer:zones"},
+					{"id": 3, "text": "history result", "score": 0.97, "source": "carto/myproj/auth/layer:history"},
+					{"id": 4, "text": "blueprint result", "score": 0.96, "source": "carto/myproj/_system/layer:blueprint"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer memSrv.Close()
+
+	memoriesClient := storage.NewMemoriesClient(memSrv.URL, "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"text":"auth","project":"myproj","tier":"mini","k":10}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/query", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Results []queryResultItem `json:"results"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Results) != 2 {
+		t.Fatalf("expected 2 mini-tier results, got %d: %+v", len(resp.Results), resp.Results)
+	}
+
+	for _, result := range resp.Results {
+		if result.Layer != storage.LayerZones && result.Layer != storage.LayerBlueprint {
+			t.Fatalf("unexpected layer %q in mini-tier results", result.Layer)
+		}
+	}
+}
+
 func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
 	// Simulates the real-world issue: search returns results from non-matching
 	// sources (e.g. "claude-code/..."), so the project source prefix filter
@@ -457,6 +507,73 @@ func TestPatchConfig(t *testing.T) {
 	// Unchanged field should remain the same.
 	if resp.MemoriesURL != "http://localhost:8900" {
 		t.Errorf("memories_url should be unchanged, got %q", resp.MemoriesURL)
+	}
+}
+
+func TestTestMemories_FallsBackToSavedAPIKey(t *testing.T) {
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "saved-key" {
+			t.Fatalf("expected saved X-API-Key header, got %q", r.Header.Get("X-API-Key"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer memSrv.Close()
+
+	cfg := config.Config{MemoriesKey: "saved-key"}
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(cfg, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"url":"` + memSrv.URL + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/test-memories", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["connected"] != true {
+		t.Fatalf("expected connected=true, got %v", resp)
+	}
+}
+
+func TestTestMemories_BlankAPIKeyUsesSavedConfig(t *testing.T) {
+	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "saved-key" {
+			http.Error(w, "missing saved key", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer memSrv.Close()
+
+	cfg := config.Config{MemoriesKey: "saved-key"}
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(cfg, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"url":"` + memSrv.URL + `","api_key":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/test-memories", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["connected"] != true {
+		t.Fatalf("expected connected=true when saved key is available, got %v", resp)
 	}
 }
 

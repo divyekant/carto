@@ -112,7 +112,17 @@ func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletions = append(m.deletions, prefix)
-	return 0, nil
+	kept := m.memories[:0]
+	deleted := 0
+	for _, mem := range m.memories {
+		if strings.HasPrefix(mem.source, prefix) {
+			deleted++
+			continue
+		}
+		kept = append(kept, mem)
+	}
+	m.memories = kept
+	return deleted, nil
 }
 
 func (m *mockMemories) getDeletions() []string {
@@ -139,8 +149,8 @@ type mockPipelineSource struct {
 	artifacts []sources.Artifact
 }
 
-func (s *mockPipelineSource) Name() string                { return s.name }
-func (s *mockPipelineSource) Scope() sources.Scope        { return s.scope }
+func (s *mockPipelineSource) Name() string                             { return s.name }
+func (s *mockPipelineSource) Scope() sources.Scope                     { return s.scope }
 func (s *mockPipelineSource) Configure(cfg sources.SourceConfig) error { return nil }
 func (s *mockPipelineSource) Fetch(_ context.Context, _ sources.FetchRequest) ([]sources.Artifact, error) {
 	return s.artifacts, nil
@@ -405,6 +415,197 @@ func TestRun_IncrementalManifest(t *testing.T) {
 	}
 }
 
+func TestRun_IncrementalChangeRebuildsSelectionWithoutDuplicates(t *testing.T) {
+	dir := createTempProject(t)
+	llmClient := &mockLLM{}
+	mem := &mockMemories{healthy: true}
+
+	result1, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
+		MemoriesClient: mem,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("first run returned fatal error: %v", err)
+	}
+
+	memoriesAfterFirst := len(mem.getMemories())
+	if memoriesAfterFirst == 0 {
+		t.Fatal("first run stored no memories")
+	}
+
+	updatedMain := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+}
+
+func helper() string {
+	return "help updated"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(updatedMain), 0o644); err != nil {
+		t.Fatalf("update main.go: %v", err)
+	}
+
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.mu.Unlock()
+
+	result2, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
+		MemoriesClient: mem,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("second run returned fatal error: %v", err)
+	}
+
+	if result2.FilesIndexed != result1.FilesIndexed {
+		t.Fatalf("incremental change should rebuild full selected module set: got %d files, want %d", result2.FilesIndexed, result1.FilesIndexed)
+	}
+	if len(mem.getDeletions()) == 0 {
+		t.Fatal("expected incremental rebuild to clear existing module data before storing")
+	}
+	if got := len(mem.getMemories()); got != memoriesAfterFirst {
+		t.Fatalf("incremental rebuild should replace stored memories without growing duplicates: got %d, want %d", got, memoriesAfterFirst)
+	}
+}
+
+func TestRun_IncrementalFileRemovalRebuildsRemainingFiles(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result1, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("first run returned fatal error: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "pkg", "util.go")); err != nil {
+		t.Fatalf("remove util.go: %v", err)
+	}
+
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.mu.Unlock()
+
+	result2, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     2,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("second run returned fatal error: %v", err)
+	}
+
+	if result2.FilesIndexed >= result1.FilesIndexed {
+		t.Fatalf("expected fewer files after removal rebuild, got %d then %d", result1.FilesIndexed, result2.FilesIndexed)
+	}
+	if result2.FilesIndexed == 0 {
+		t.Fatal("expected remaining files to be re-indexed after a removal")
+	}
+	if len(mem.getDeletions()) == 0 {
+		t.Fatal("expected module data to be cleared before rebuilding after a removal")
+	}
+}
+
+func TestRun_ProjectArtifactRemovalClearsStoredScope(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+	source := &mockPipelineSource{
+		name:  "mock-project",
+		scope: sources.ProjectScope,
+		artifacts: []sources.Artifact{
+			{Source: "mock-project", Category: sources.Signal, ID: "TEST-1", Title: "Test ticket"},
+		},
+	}
+	registry := sources.NewRegistry()
+	registry.Register(source)
+
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		SourceRegistry: registry,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("first run returned fatal error: %v", err)
+	}
+
+	foundProjectSignal := false
+	for _, stored := range mem.getMemories() {
+		if strings.HasPrefix(stored.source, "carto/test-project/_signals/") {
+			foundProjectSignal = true
+			break
+		}
+	}
+	if !foundProjectSignal {
+		t.Fatal("expected first run to store project-scope signal artifacts")
+	}
+
+	source.artifacts = nil
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.mu.Unlock()
+
+	_, err = Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		SourceRegistry: registry,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("second run returned fatal error: %v", err)
+	}
+
+	foundSignalClear := false
+	for _, prefix := range mem.getDeletions() {
+		if prefix == "carto/test-project/_signals/" {
+			foundSignalClear = true
+			break
+		}
+	}
+	if !foundSignalClear {
+		t.Fatal("expected project-scope signal namespace to be cleared when artifacts disappear")
+	}
+
+	for _, stored := range mem.getMemories() {
+		if strings.HasPrefix(stored.source, "carto/test-project/_signals/") {
+			t.Fatalf("stale project-scope signal artifact remained after removal: %q", stored.source)
+		}
+	}
+}
+
 func TestRun_ProgressPhases(t *testing.T) {
 	dir := createTempProject(t)
 	llmClient := &mockLLM{}
@@ -414,11 +615,11 @@ func TestRun_ProgressPhases(t *testing.T) {
 	var phaseMu sync.Mutex
 
 	_, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
+		MaxWorkers:     1,
 		ProgressFn: func(phase string, done, total int) {
 			phaseMu.Lock()
 			defer phaseMu.Unlock()
@@ -459,11 +660,11 @@ func TestRun_ErrorCollection(t *testing.T) {
 	mem := &mockMemories{healthy: true}
 
 	result, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
+		MaxWorkers:     1,
 	})
 	if err != nil {
 		t.Fatalf("Run returned fatal error: %v", err)
@@ -482,12 +683,12 @@ func TestRun_NilProgressFn(t *testing.T) {
 
 	// Run without a progress callback -- should not panic.
 	result, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
-		ProgressFn:  nil,
+		MaxWorkers:     1,
+		ProgressFn:     nil,
 	})
 	if err != nil {
 		t.Fatalf("Run returned fatal error: %v", err)
@@ -513,11 +714,11 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			results[idx], errs[idx] = Run(Config{
-				ProjectName: "test-project",
-				RootPath:    dir,
-				LLMClient:   &mockLLM{},
+				ProjectName:    "test-project",
+				RootPath:       dir,
+				LLMClient:      &mockLLM{},
 				MemoriesClient: &mockMemories{healthy: true},
-				MaxWorkers:  2,
+				MaxWorkers:     2,
 				ProgressFn: func(phase string, done, total int) {
 					opCount.Add(1)
 				},
