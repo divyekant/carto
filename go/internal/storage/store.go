@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 // Layer constants for tagging in Memories.
@@ -110,7 +111,7 @@ func (s *Store) StoreBatch(module, layer string, entries []string) error {
 //   - standard: mini + atoms + wiring
 //   - full: standard + history + signals
 func (s *Store) RetrieveByTier(module string, tier Tier) (map[string][]SearchResult, error) {
-	layers, ok := tierLayers[tier]
+	layers, ok := LayersForTier(tier)
 	if !ok {
 		return nil, fmt.Errorf("unknown tier: %s", tier)
 	}
@@ -124,6 +125,58 @@ func (s *Store) RetrieveByTier(module string, tier Tier) (map[string][]SearchRes
 		result[layer] = results
 	}
 	return result, nil
+}
+
+// LayersForTier returns the ordered layers required for the given retrieval tier.
+func LayersForTier(tier Tier) ([]string, bool) {
+	layers, ok := tierLayers[tier]
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, len(layers))
+	copy(out, layers)
+	return out, true
+}
+
+// SearchByTier performs a project-scoped semantic search and filters the
+// results to the layers included in the requested tier.
+func (s *Store) SearchByTier(query string, tier Tier, k int) ([]SearchResult, error) {
+	if k <= 0 {
+		k = 10
+	}
+
+	layers, ok := LayersForTier(tier)
+	if !ok {
+		return nil, fmt.Errorf("unknown tier: %s", tier)
+	}
+
+	allowed := make(map[string]struct{}, len(layers))
+	for _, layer := range layers {
+		allowed[layer] = struct{}{}
+	}
+
+	sourcePrefix := fmt.Sprintf("carto/%s/", s.project)
+	results, err := s.memories.Search(query, SearchOptions{
+		K:            k * 5,
+		Hybrid:       true,
+		SourcePrefix: sourcePrefix,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := filterSearchResults(results, sourcePrefix, allowed, k)
+	if len(filtered) > 0 {
+		return filtered, nil
+	}
+
+	// Fallback to prefix listing for Memories backends that ignore source filters
+	// during search. Results remain layer-filtered to preserve tier semantics.
+	listed, err := s.memories.ListBySource(sourcePrefix, k*20, 0)
+	if err != nil {
+		return filtered, nil
+	}
+	return filterSearchResults(listed, sourcePrefix, allowed, k), nil
 }
 
 // RetrieveLayer retrieves all entries for a specific layer using ListBySource.
@@ -144,6 +197,32 @@ func (s *Store) ClearProject() error {
 	prefix := fmt.Sprintf("carto/%s/", s.project)
 	_, err := s.memories.DeleteBySource(prefix)
 	return err
+}
+
+func filterSearchResults(results []SearchResult, sourcePrefix string, allowed map[string]struct{}, limit int) []SearchResult {
+	filtered := make([]SearchResult, 0, min(limit, len(results)))
+	for _, result := range results {
+		if sourcePrefix != "" && !strings.HasPrefix(result.Source, sourcePrefix) {
+			continue
+		}
+		layer := layerFromSource(result.Source)
+		if _, ok := allowed[layer]; !ok {
+			continue
+		}
+		filtered = append(filtered, result)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered
+}
+
+func layerFromSource(source string) string {
+	idx := strings.LastIndex(source, "/layer:")
+	if idx == -1 {
+		return ""
+	}
+	return source[idx+len("/layer:"):]
 }
 
 // truncate shortens content to at most maxLen characters. It cuts at the last

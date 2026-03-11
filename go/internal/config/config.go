@@ -113,24 +113,24 @@ func DefaultConfigFilePath() string {
 
 // persistedConfig is the JSON shape written to the config file.
 type persistedConfig struct {
-	MemoriesURL   string `json:"memories_url,omitempty"`
-	MemoriesKey   string `json:"memories_key,omitempty"`
-	AnthropicKey  string `json:"anthropic_key,omitempty"`
-	FastModel     string `json:"fast_model,omitempty"`
-	DeepModel     string `json:"deep_model,omitempty"`
-	MaxConcurrent int    `json:"max_concurrent,omitempty"`
-	FastMaxTokens int    `json:"fast_max_tokens,omitempty"`
-	DeepMaxTokens int    `json:"deep_max_tokens,omitempty"`
-	LLMProvider   string `json:"llm_provider,omitempty"`
-	LLMApiKey     string `json:"llm_api_key,omitempty"`
-	LLMBaseURL    string `json:"llm_base_url,omitempty"`
-	GitHubToken   string `json:"github_token,omitempty"`
-	JiraToken     string `json:"jira_token,omitempty"`
-	JiraEmail     string `json:"jira_email,omitempty"`
-	JiraBaseURL   string `json:"jira_base_url,omitempty"`
-	LinearToken   string `json:"linear_token,omitempty"`
-	NotionToken   string `json:"notion_token,omitempty"`
-	SlackToken    string `json:"slack_token,omitempty"`
+	MemoriesURL   *string `json:"memories_url,omitempty"`
+	MemoriesKey   *string `json:"memories_key,omitempty"`
+	AnthropicKey  *string `json:"anthropic_key,omitempty"`
+	FastModel     *string `json:"fast_model,omitempty"`
+	DeepModel     *string `json:"deep_model,omitempty"`
+	MaxConcurrent *int    `json:"max_concurrent,omitempty"`
+	FastMaxTokens *int    `json:"fast_max_tokens,omitempty"`
+	DeepMaxTokens *int    `json:"deep_max_tokens,omitempty"`
+	LLMProvider   *string `json:"llm_provider,omitempty"`
+	LLMApiKey     *string `json:"llm_api_key,omitempty"`
+	LLMBaseURL    *string `json:"llm_base_url,omitempty"`
+	GitHubToken   *string `json:"github_token,omitempty"`
+	JiraToken     *string `json:"jira_token,omitempty"`
+	JiraEmail     *string `json:"jira_email,omitempty"`
+	JiraBaseURL   *string `json:"jira_base_url,omitempty"`
+	LinearToken   *string `json:"linear_token,omitempty"`
+	NotionToken   *string `json:"notion_token,omitempty"`
+	SlackToken    *string `json:"slack_token,omitempty"`
 }
 
 // ConfigPath is the file path where UI settings are persisted.
@@ -179,24 +179,24 @@ func Save(cfg Config) error {
 		return nil
 	}
 	p := persistedConfig{
-		MemoriesURL:   cfg.MemoriesURL,
-		MemoriesKey:   cfg.MemoriesKey,
-		AnthropicKey:  cfg.AnthropicKey,
-		FastModel:     cfg.FastModel,
-		DeepModel:     cfg.DeepModel,
-		MaxConcurrent: cfg.MaxConcurrent,
-		FastMaxTokens: cfg.FastMaxTokens,
-		DeepMaxTokens: cfg.DeepMaxTokens,
-		LLMProvider:   cfg.LLMProvider,
-		LLMApiKey:     cfg.LLMApiKey,
-		LLMBaseURL:    cfg.LLMBaseURL,
-		GitHubToken:   cfg.GitHubToken,
-		JiraToken:     cfg.JiraToken,
-		JiraEmail:     cfg.JiraEmail,
-		JiraBaseURL:   cfg.JiraBaseURL,
-		LinearToken:   cfg.LinearToken,
-		NotionToken:   cfg.NotionToken,
-		SlackToken:    cfg.SlackToken,
+		MemoriesURL:   stringPtr(cfg.MemoriesURL),
+		MemoriesKey:   stringPtr(cfg.MemoriesKey),
+		AnthropicKey:  stringPtr(cfg.AnthropicKey),
+		FastModel:     stringPtr(cfg.FastModel),
+		DeepModel:     stringPtr(cfg.DeepModel),
+		MaxConcurrent: intPtr(cfg.MaxConcurrent),
+		FastMaxTokens: intPtr(cfg.FastMaxTokens),
+		DeepMaxTokens: intPtr(cfg.DeepMaxTokens),
+		LLMProvider:   stringPtr(cfg.LLMProvider),
+		LLMApiKey:     stringPtr(cfg.LLMApiKey),
+		LLMBaseURL:    stringPtr(cfg.LLMBaseURL),
+		GitHubToken:   stringPtr(cfg.GitHubToken),
+		JiraToken:     stringPtr(cfg.JiraToken),
+		JiraEmail:     stringPtr(cfg.JiraEmail),
+		JiraBaseURL:   stringPtr(cfg.JiraBaseURL),
+		LinearToken:   stringPtr(cfg.LinearToken),
+		NotionToken:   stringPtr(cfg.NotionToken),
+		SlackToken:    stringPtr(cfg.SlackToken),
 	}
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -216,60 +216,68 @@ func loadPersistedConfig(path string) (persistedConfig, error) {
 }
 
 func mergeConfig(cfg *Config, p persistedConfig) {
-	if p.MemoriesURL != "" {
-		cfg.MemoriesURL = p.MemoriesURL
+	if p.MemoriesURL != nil {
+		cfg.MemoriesURL = *p.MemoriesURL
 	}
-	if p.MemoriesKey != "" {
-		cfg.MemoriesKey = p.MemoriesKey
+	if p.MemoriesKey != nil {
+		cfg.MemoriesKey = *p.MemoriesKey
 	}
-	if p.AnthropicKey != "" {
-		cfg.AnthropicKey = p.AnthropicKey
+	if p.AnthropicKey != nil {
+		cfg.AnthropicKey = *p.AnthropicKey
 	}
-	if p.FastModel != "" {
-		cfg.FastModel = p.FastModel
+	if p.FastModel != nil {
+		cfg.FastModel = *p.FastModel
 	}
-	if p.DeepModel != "" {
-		cfg.DeepModel = p.DeepModel
+	if p.DeepModel != nil {
+		cfg.DeepModel = *p.DeepModel
 	}
-	if p.MaxConcurrent != 0 {
-		cfg.MaxConcurrent = p.MaxConcurrent
+	if p.MaxConcurrent != nil {
+		cfg.MaxConcurrent = *p.MaxConcurrent
 	}
-	if p.FastMaxTokens != 0 {
-		cfg.FastMaxTokens = p.FastMaxTokens
+	if p.FastMaxTokens != nil {
+		cfg.FastMaxTokens = *p.FastMaxTokens
 	}
-	if p.DeepMaxTokens != 0 {
-		cfg.DeepMaxTokens = p.DeepMaxTokens
+	if p.DeepMaxTokens != nil {
+		cfg.DeepMaxTokens = *p.DeepMaxTokens
 	}
-	if p.LLMProvider != "" {
-		cfg.LLMProvider = p.LLMProvider
+	if p.LLMProvider != nil {
+		cfg.LLMProvider = *p.LLMProvider
 	}
-	if p.LLMApiKey != "" {
-		cfg.LLMApiKey = p.LLMApiKey
+	if p.LLMApiKey != nil {
+		cfg.LLMApiKey = *p.LLMApiKey
 	}
-	if p.LLMBaseURL != "" {
-		cfg.LLMBaseURL = p.LLMBaseURL
+	if p.LLMBaseURL != nil {
+		cfg.LLMBaseURL = *p.LLMBaseURL
 	}
-	if p.GitHubToken != "" {
-		cfg.GitHubToken = p.GitHubToken
+	if p.GitHubToken != nil {
+		cfg.GitHubToken = *p.GitHubToken
 	}
-	if p.JiraToken != "" {
-		cfg.JiraToken = p.JiraToken
+	if p.JiraToken != nil {
+		cfg.JiraToken = *p.JiraToken
 	}
-	if p.JiraEmail != "" {
-		cfg.JiraEmail = p.JiraEmail
+	if p.JiraEmail != nil {
+		cfg.JiraEmail = *p.JiraEmail
 	}
-	if p.JiraBaseURL != "" {
-		cfg.JiraBaseURL = p.JiraBaseURL
+	if p.JiraBaseURL != nil {
+		cfg.JiraBaseURL = *p.JiraBaseURL
 	}
-	if p.LinearToken != "" {
-		cfg.LinearToken = p.LinearToken
+	if p.LinearToken != nil {
+		cfg.LinearToken = *p.LinearToken
 	}
-	if p.NotionToken != "" {
-		cfg.NotionToken = p.NotionToken
+	if p.NotionToken != nil {
+		cfg.NotionToken = *p.NotionToken
 	}
-	if p.SlackToken != "" {
-		cfg.SlackToken = p.SlackToken
+	if p.SlackToken != nil {
+		cfg.SlackToken = *p.SlackToken
 	}
+}
+
+func stringPtr(v string) *string {
+	return &v
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 // IsDocker returns true when running inside a Docker container.

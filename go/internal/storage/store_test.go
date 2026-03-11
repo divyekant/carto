@@ -12,6 +12,8 @@ type mockMemories struct {
 	batches  [][]Memory
 	results  map[string][]SearchResult // source -> results
 	deleted  []string
+	search   []SearchResult
+	opts     []SearchOptions
 }
 
 func newMockMemories() *mockMemories {
@@ -34,7 +36,8 @@ func (m *mockMemories) AddBatch(memories []Memory) error {
 }
 
 func (m *mockMemories) Search(query string, opts SearchOptions) ([]SearchResult, error) {
-	return nil, nil
+	m.opts = append(m.opts, opts)
+	return m.search, nil
 }
 
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]SearchResult, error) {
@@ -259,6 +262,68 @@ func TestRetrieveByTier_Full(t *testing.T) {
 	for _, layer := range expectedLayers {
 		if _, ok := result[layer]; !ok {
 			t.Errorf("expected %s layer in result", layer)
+		}
+	}
+}
+
+func TestSearchByTier_FiltersLayersAndScopesProject(t *testing.T) {
+	mock := newMockMemories()
+	s := NewStore(mock, "proj")
+
+	mock.search = []SearchResult{
+		{ID: 1, Text: "zones", Source: "carto/proj/web/layer:zones"},
+		{ID: 2, Text: "blueprint", Source: "carto/proj/_system/layer:blueprint"},
+		{ID: 3, Text: "atoms", Source: "carto/proj/web/layer:atoms"},
+		{ID: 4, Text: "history", Source: "carto/proj/web/layer:history"},
+		{ID: 5, Text: "other project", Source: "carto/other/web/layer:atoms"},
+	}
+
+	results, err := s.SearchByTier("auth", TierStandard, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.opts) != 1 {
+		t.Fatalf("expected 1 search call, got %d", len(mock.opts))
+	}
+	if mock.opts[0].SourcePrefix != "carto/proj/" {
+		t.Fatalf("expected SourcePrefix carto/proj/, got %q", mock.opts[0].SourcePrefix)
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 filtered results, got %d", len(results))
+	}
+	for _, result := range results {
+		if strings.Contains(result.Source, "layer:history") {
+			t.Fatalf("history layer should not be included in standard tier: %+v", result)
+		}
+		if strings.HasPrefix(result.Source, "carto/other/") {
+			t.Fatalf("other project result should not be included: %+v", result)
+		}
+	}
+}
+
+func TestSearchByTier_FallsBackToListBySource(t *testing.T) {
+	mock := newMockMemories()
+	s := NewStore(mock, "proj")
+
+	mock.results["carto/proj/"] = []SearchResult{
+		{ID: 1, Text: "zones", Source: "carto/proj/web/layer:zones"},
+		{ID: 2, Text: "blueprint", Source: "carto/proj/_system/layer:blueprint"},
+		{ID: 3, Text: "signals", Source: "carto/proj/web/layer:signals"},
+	}
+
+	results, err := s.SearchByTier("auth", TierMini, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 fallback results, got %d", len(results))
+	}
+	for _, result := range results {
+		if strings.Contains(result.Source, "layer:signals") {
+			t.Fatalf("signals layer should not be included in mini tier: %+v", result)
 		}
 	}
 }

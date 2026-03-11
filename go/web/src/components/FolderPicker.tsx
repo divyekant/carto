@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { apiFetch } from '@/lib/api'
 
 interface BrowseResult {
   current: string
@@ -21,9 +22,8 @@ export function FolderPicker({ value, onChange }: FolderPickerProps) {
   function browse(path: string) {
     setLoading(true)
     const params = path ? `?path=${encodeURIComponent(path)}` : ''
-    fetch(`/api/browse${params}`)
-      .then(r => r.json())
-      .then((result: BrowseResult) => {
+    apiFetch<BrowseResult>(`/browse${params}`)
+      .then((result) => {
         setData(result)
         setBrowsePath(result.current)
       })

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
+import { apiFetch } from '@/lib/api'
 
 interface SourceDef {
   key: string
@@ -78,9 +79,10 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    fetch(`/api/projects/${encodeURIComponent(projectName)}/sources`)
-      .then(r => r.json())
-      .then(data => {
+    apiFetch<{ sources?: Record<string, Record<string, string>>; credentials?: Record<string, boolean> }>(
+      `/projects/${encodeURIComponent(projectName)}/sources`,
+    )
+      .then((data) => {
         setSources(data.sources || {})
         setCredentials(data.credentials || {})
         const en: Record<string, boolean> = {}
@@ -124,12 +126,10 @@ export function SourcesEditor({ projectName }: SourcesEditorProps) {
         }
       }
 
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/sources`, {
+      await apiFetch(`/projects/${encodeURIComponent(projectName)}/sources`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sources: payload }),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success('Sources saved')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save')

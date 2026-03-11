@@ -90,6 +90,50 @@ func TestImportCmd_AddStrategy(t *testing.T) {
 	}
 }
 
+func TestImportCmd_RewritesSourcesIntoTargetProject(t *testing.T) {
+	withCleanEnv(t)
+
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/memory/add-batch":
+			receivedBody, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"ok":true}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MEMORIES_URL", srv.URL)
+
+	root := newRootWithImport()
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetIn(strings.NewReader(`{"text":"func main() {}","source":"carto/oldproj/api/layer:atoms"}`))
+	root.SetArgs([]string{"import", "--project", "newproj", "--pretty"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("import command failed: %v", err)
+	}
+
+	var payload struct {
+		Memories []struct {
+			Source string `json:"source"`
+		} `json:"memories"`
+	}
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("invalid batch body: %v", err)
+	}
+	if len(payload.Memories) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(payload.Memories))
+	}
+	if payload.Memories[0].Source != "carto/newproj/api/layer:atoms" {
+		t.Fatalf("expected rewritten source, got %q", payload.Memories[0].Source)
+	}
+}
+
 // =========================================================================
 // TestImportCmd_ReplaceStrategy_RequiresConfirmation
 // =========================================================================
@@ -283,5 +327,48 @@ func TestImportCmd_JSONEnvelope(t *testing.T) {
 	}
 	if env.Data.Strategy != "add" {
 		t.Errorf("expected strategy=add, got %q", env.Data.Strategy)
+	}
+}
+
+func TestRewriteImportSource(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		source  string
+		want    string
+	}{
+		{
+			name:    "empty source uses import namespace",
+			project: "target",
+			source:  "",
+			want:    "carto/target/import",
+		},
+		{
+			name:    "module source rewrites into target project",
+			project: "target",
+			source:  "carto/origin/web/layer:atoms",
+			want:    "carto/target/web/layer:atoms",
+		},
+		{
+			name:    "system source rewrites into target project",
+			project: "target",
+			source:  "carto/origin/_system/layer:blueprint",
+			want:    "carto/target/_system/layer:blueprint",
+		},
+		{
+			name:    "non carto source falls back to import namespace",
+			project: "target",
+			source:  "legacy/source",
+			want:    "carto/target/import",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriteImportSource(tt.project, tt.source)
+			if got != tt.want {
+				t.Fatalf("rewriteImportSource(%q, %q) = %q, want %q", tt.project, tt.source, got, tt.want)
+			}
+		})
 	}
 }

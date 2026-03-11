@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -106,15 +107,9 @@ func runImport(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 
-		// Ensure source has the project prefix.
-		source := rec.Source
-		if source == "" {
-			source = "carto/" + project + "/import"
-		}
-
 		batch = append(batch, storage.Memory{
 			Text:     rec.Text,
-			Source:   source,
+			Source:   rewriteImportSource(project, rec.Source),
 			Metadata: rec.Metadata,
 		})
 
@@ -156,4 +151,17 @@ func runImport(cmd *cobra.Command, _ []string) error {
 		"strategy": strategy,
 	})
 	return nil
+}
+
+func rewriteImportSource(project, source string) string {
+	if source == "" {
+		return "carto/" + project + "/import"
+	}
+	if strings.HasPrefix(source, "carto/") {
+		parts := strings.SplitN(source, "/", 3)
+		if len(parts) == 3 {
+			return "carto/" + project + "/" + parts[2]
+		}
+	}
+	return "carto/" + project + "/import"
 }

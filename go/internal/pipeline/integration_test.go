@@ -123,7 +123,20 @@ func (f *integrationMemories) Count(sourcePrefix string) (int, error) {
 }
 
 func (f *integrationMemories) DeleteBySource(prefix string) (int, error) {
-	return 0, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	kept := f.memories[:0]
+	deleted := 0
+	for _, mem := range f.memories {
+		if strings.HasPrefix(mem.Source, prefix) {
+			deleted++
+			continue
+		}
+		kept = append(kept, mem)
+	}
+	f.memories = kept
+	return deleted, nil
 }
 
 // getMemories returns a snapshot of all stored memories.

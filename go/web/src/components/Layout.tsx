@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { apiFetch } from '@/lib/api'
 import { useTheme } from './ThemeProvider'
 
 const navItems = [
@@ -130,7 +131,7 @@ export function Layout() {
   const [health, setHealth] = useState<{ memories_healthy: boolean } | null>(null)
 
   useEffect(() => {
-    fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => {})
+    apiFetch<{ memories_healthy: boolean }>('/health').then(setHealth).catch(() => {})
   }, [])
 
   return (

@@ -9,6 +9,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -58,11 +59,10 @@ func runExport(cmd *cobra.Command, _ []string) error {
 
 	client := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
-	// Build source prefix filter.
+	// Export always reads the full project prefix. Layer filtering happens
+	// client-side because stored sources are module-scoped:
+	// carto/{project}/{module}/layer:{layer}
 	sourcePrefix := "carto/" + project + "/"
-	if layer != "" {
-		sourcePrefix = "carto/" + project + "/layer:" + layer
-	}
 
 	// Stream mode (default) vs envelope mode (--json).
 	jsonMode := isJSONMode(cmd)
@@ -90,6 +90,9 @@ func runExport(cmd *cobra.Command, _ []string) error {
 		if !jsonMode {
 			// Stream NDJSON: one entry per line.
 			for _, r := range results {
+				if layer != "" && !strings.Contains(r.Source, "/layer:"+layer) {
+					continue
+				}
 				entry := exportEntry{
 					ID:       r.ID,
 					Text:     r.Text,
@@ -97,10 +100,16 @@ func runExport(cmd *cobra.Command, _ []string) error {
 					Metadata: r.Meta,
 				}
 				enc.Encode(entry) //nolint:errcheck
+				exported++
+			}
+		} else {
+			for _, r := range results {
+				if layer != "" && !strings.Contains(r.Source, "/layer:"+layer) {
+					continue
+				}
+				exported++
 			}
 		}
-
-		exported += len(results)
 		offset += len(results)
 
 		if len(results) < pageSize {

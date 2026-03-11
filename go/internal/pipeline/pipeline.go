@@ -153,39 +153,55 @@ func Run(cfg Config) (*Result, error) {
 
 	var work []moduleWork
 	totalFiles := 0
+	refreshProjectSourcesOnly := false
 
-	for _, mod := range modules {
-		files := mod.Files
-		if cfg.Incremental && !mf.IsEmpty() {
-			changed, detectErr := mf.DetectChanges(files, scanResult.Root)
+	if cfg.Incremental && !mf.IsEmpty() {
+		selectionChanged := false
+		for _, mod := range modules {
+			changed, detectErr := mf.DetectChanges(mod.Files, scanResult.Root)
 			if detectErr != nil {
 				log.Printf("pipeline: warning: change detection failed for %s: %v", mod.Name, detectErr)
-				// Fall through to full index for this module.
-			} else {
-				// Only process added and modified files.
-				files = append(changed.Added, changed.Modified...)
-
-				// Clean removed files from Memories.
-				if len(changed.Removed) > 0 {
-					store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
-					if clearErr := store.ClearModule(mod.Name); clearErr != nil {
-						log.Printf("pipeline: warning: failed to clear module %s: %v", mod.Name, clearErr)
-						result.Errors = append(result.Errors, clearErr)
-					}
-					// Remove from manifest.
-					for _, rp := range changed.Removed {
-						mf.RemoveFile(rp)
-					}
-				}
+				logFn("warn", fmt.Sprintf("Change detection failed for %s, re-indexing selected modules", mod.Name))
+				selectionChanged = true
+				continue
+			}
+			if len(changed.Added)+len(changed.Modified)+len(changed.Removed) > 0 {
+				selectionChanged = true
+			}
+			for _, rp := range changed.Removed {
+				mf.RemoveFile(rp)
 			}
 		}
 
-		if len(files) == 0 {
-			continue
+		if !selectionChanged {
+			if cfg.SourceRegistry == nil {
+				logFn("info", "No changes detected, nothing to index")
+				return result, nil
+			}
+
+			// External project context can change independently of repo file
+			// hashes, so keep the run alive long enough to refresh source-backed
+			// artifacts without rebuilding module layers.
+			logFn("info", "No code changes detected, refreshing source-backed project context only...")
+			refreshProjectSourcesOnly = true
 		}
 
-		work = append(work, moduleWork{module: mod, filesToIndex: files})
-		totalFiles += len(files)
+		if selectionChanged {
+			// Correctness over partial updates: once any file in the selected module
+			// set changes, rebuild the full selected module set so module/system layers
+			// remain consistent and stale memories do not accumulate.
+			logFn("info", "Changes detected, rebuilding selected modules for consistency...")
+		}
+	}
+
+	if !refreshProjectSourcesOnly {
+		for _, mod := range modules {
+			if len(mod.Files) == 0 {
+				continue
+			}
+			work = append(work, moduleWork{module: mod, filesToIndex: mod.Files})
+			totalFiles += len(mod.Files)
+		}
 	}
 
 	result.FilesIndexed = totalFiles
@@ -446,12 +462,10 @@ func Run(cfg Config) (*Result, error) {
 
 		modName := w.module.Name
 
-		// For non-incremental runs, clear existing module data before storing
-		// to prevent duplicate entries accumulating in Memories.
-		if !cfg.Incremental {
-			if err := store.ClearModule(modName); err != nil {
-				log.Printf("pipeline: warning: failed to clear module %s before re-storing: %v", modName, err)
-			}
+		// Each stored module is written as a full replacement for that module's
+		// namespace. This prevents stale memories from surviving incremental runs.
+		if err := store.ClearModule(modName); err != nil {
+			log.Printf("pipeline: warning: failed to clear module %s before re-storing: %v", modName, err)
 		}
 
 		// Store atoms individually for better searchability and to avoid
@@ -534,6 +548,9 @@ func Run(cfg Config) (*Result, error) {
 
 	// Store system-wide blueprint and patterns.
 	if result.Synthesis != nil {
+		if err := store.ClearModule("_system"); err != nil {
+			log.Printf("pipeline: warning: failed to clear system layers: %v", err)
+		}
 		if err := store.StoreLayer("_system", "blueprint", result.Synthesis.Blueprint); err != nil {
 			log.Printf("pipeline: warning: failed to store blueprint: %v", err)
 			result.Errors = append(result.Errors, err)
@@ -552,6 +569,14 @@ func Run(cfg Config) (*Result, error) {
 	} else {
 		storeDone += 2
 		progress("store", storeDone, storeTotal)
+	}
+
+	// Project-scope artifacts are also full replacements. Clear each category
+	// namespace up front so removed artifacts do not survive later runs.
+	for _, layer := range []string{"_signals", "_knowledge", "_context"} {
+		if err := store.ClearModule(layer); err != nil {
+			log.Printf("pipeline: warning: failed to clear %s artifacts: %v", layer, err)
+		}
 	}
 
 	// Store project-scope artifacts by category.

@@ -36,29 +36,46 @@ export class ApiError extends Error {
  * @returns     Parsed JSON response body typed as T
  * @throws      ApiError if the server responds with a non-OK status code
  */
-export async function apiFetch<T = unknown>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const token = localStorage.getItem('carto_token') ?? ''
+interface ApiRequestOptions {
+  init?: RequestInit
+  skipUnauthorizedRedirect?: boolean
+}
 
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(init?.headers ?? {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+function mergeHeaders(
+  headersInit: HeadersInit | undefined,
+  contentType: string | null,
+): Headers {
+  const headers = new Headers(headersInit)
+
+  if (contentType && !headers.has('Content-Type')) {
+    headers.set('Content-Type', contentType)
   }
 
+  const token = localStorage.getItem('carto_token') ?? ''
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  return headers
+}
+
+async function apiRequest(
+  path: string,
+  { init, skipUnauthorizedRedirect = false }: ApiRequestOptions = {},
+  contentType: string | null,
+): Promise<Response> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers,
+    headers: mergeHeaders(init?.headers, contentType),
   })
 
   // 401 Unauthorized → stored token is stale or auth was just enabled on the
   // server. Clear the token so AuthGuard will prompt for a new one.
   if (res.status === 401) {
-    localStorage.removeItem('carto_token')
-    window.location.reload()
-    // Unreachable after reload, but satisfies TypeScript's control-flow analysis.
+    if (!skipUnauthorizedRedirect) {
+      localStorage.removeItem('carto_token')
+      window.location.reload()
+    }
     throw new ApiError(401, 'Unauthorized — please re-authenticate')
   }
 
@@ -75,6 +92,15 @@ export async function apiFetch<T = unknown>(
     throw new ApiError(res.status, message)
   }
 
+  return res
+}
+
+export async function apiFetch<T = unknown>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const res = await apiRequest(path, { init }, 'application/json')
+
   // Return parsed JSON for all OK responses.
   return res.json() as Promise<T>
 }
@@ -87,24 +113,7 @@ export async function apiFetch<T = unknown>(
 export async function apiFetchRaw(
   path: string,
   init?: RequestInit,
+  options?: Omit<ApiRequestOptions, 'init'>,
 ): Promise<Response> {
-  const token = localStorage.getItem('carto_token') ?? ''
-
-  const headers: HeadersInit = {
-    ...(init?.headers ?? {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  })
-
-  if (res.status === 401) {
-    localStorage.removeItem('carto_token')
-    window.location.reload()
-    throw new ApiError(401, 'Unauthorized — please re-authenticate')
-  }
-
-  return res
+  return apiRequest(path, { init, ...options }, null)
 }

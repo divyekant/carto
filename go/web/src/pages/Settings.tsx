@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Section } from '@/components/Section'
+import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 // Matches the Go configResponse JSON shape exactly
@@ -110,6 +111,16 @@ const PROVIDER_DEFAULTS: Record<string, ProviderConfig> = {
 }
 
 const CUSTOM_MODEL_VALUE = '__custom__'
+const SECRET_FIELDS = new Set<keyof Config>([
+  'anthropic_key',
+  'llm_api_key',
+  'memories_key',
+  'github_token',
+  'jira_token',
+  'linear_token',
+  'notion_token',
+  'slack_token',
+])
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -270,28 +281,16 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
   onChange: (value: string) => void
   error?: string
 }) {
-  const isCustom = value !== '' && !models.some(m => m.value === value)
-  const [showCustomInput, setShowCustomInput] = useState(isCustom)
-  const [customValue, setCustomValue] = useState(isCustom ? value : '')
-
-  const prevModelsRef = useRef(models)
-  useEffect(() => {
-    if (prevModelsRef.current !== models) {
-      prevModelsRef.current = models
-      const stillCustom = value !== '' && !models.some(m => m.value === value)
-      setShowCustomInput(stillCustom)
-      setCustomValue(stillCustom ? value : '')
-    }
-  }, [models, value])
+  const isKnownModel = models.some(m => m.value === value)
+  const [customMode, setCustomMode] = useState(value !== '' && !isKnownModel)
+  const showCustomInput = customMode || (value !== '' && !isKnownModel)
 
   function handleSelectChange(v: string) {
     if (v === CUSTOM_MODEL_VALUE) {
-      setShowCustomInput(true)
-      setCustomValue('')
+      setCustomMode(true)
       onChange('')
     } else {
-      setShowCustomInput(false)
-      setCustomValue('')
+      setCustomMode(false)
       onChange(v)
     }
   }
@@ -321,11 +320,8 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
       {showCustomInput && (
         <Input
           placeholder="e.g. my-custom-model"
-          value={customValue}
-          onChange={(e) => {
-            setCustomValue(e.target.value)
-            onChange(e.target.value)
-          }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           className={cn('h-7 text-xs', error && 'border-red-500 focus-visible:ring-red-500')}
           autoFocus
         />
@@ -369,8 +365,8 @@ export default function Settings() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/config').then(r => r.json()),
-      fetch('/api/health').then(r => r.json()),
+      apiFetch<Config>('/config'),
+      apiFetch<{ docker?: boolean }>('/health'),
     ]).then(([configData, healthData]) => {
       const memoriesUrl = configData.memories_url?.replace('host.docker.internal', 'localhost') || configData.memories_url
       setConfig({ ...configData, memories_url: memoriesUrl })
@@ -387,6 +383,17 @@ export default function Settings() {
       return next
     })
     setTouched(prev => new Set(prev).add(key))
+  }
+
+  function getPatchValue(key: keyof Config): string | number | undefined {
+    const value = config[key]
+    if (typeof value !== 'string') {
+      return value
+    }
+    if (SECRET_FIELDS.has(key)) {
+      return value.includes('****') ? undefined : value
+    }
+    return value
   }
 
   function handleProviderChange(provider: string) {
@@ -424,33 +431,38 @@ export default function Settings() {
     setSaving(true)
     try {
       const patch: Record<string, unknown> = {
-        llm_provider: config.llm_provider,
-        fast_model: config.fast_model,
-        deep_model: config.deep_model,
-        memories_url: config.memories_url,
-        max_concurrent: config.max_concurrent,
-        fast_max_tokens: config.fast_max_tokens,
-        deep_max_tokens: config.deep_max_tokens,
+        llm_provider: getPatchValue('llm_provider'),
+        fast_model: getPatchValue('fast_model'),
+        deep_model: getPatchValue('deep_model'),
+        memories_url: getPatchValue('memories_url'),
+        max_concurrent: getPatchValue('max_concurrent'),
+        fast_max_tokens: getPatchValue('fast_max_tokens'),
+        deep_max_tokens: getPatchValue('deep_max_tokens'),
       }
 
-      if (config.anthropic_key && !config.anthropic_key.includes('****')) patch.anthropic_key = config.anthropic_key
-      if (config.llm_api_key && !config.llm_api_key.includes('****')) patch.llm_api_key = config.llm_api_key
-      if (config.memories_key && !config.memories_key.includes('****')) patch.memories_key = config.memories_key
-      if (config.llm_base_url) patch.llm_base_url = config.llm_base_url
-      if (config.github_token && !config.github_token.includes('****')) patch.github_token = config.github_token
-      if (config.jira_token && !config.jira_token.includes('****')) patch.jira_token = config.jira_token
-      if (config.jira_email) patch.jira_email = config.jira_email
-      if (config.jira_base_url) patch.jira_base_url = config.jira_base_url
-      if (config.linear_token && !config.linear_token.includes('****')) patch.linear_token = config.linear_token
-      if (config.notion_token && !config.notion_token.includes('****')) patch.notion_token = config.notion_token
-      if (config.slack_token && !config.slack_token.includes('****')) patch.slack_token = config.slack_token
+      for (const key of [
+        'anthropic_key',
+        'llm_api_key',
+        'memories_key',
+        'llm_base_url',
+        'github_token',
+        'jira_token',
+        'jira_email',
+        'jira_base_url',
+        'linear_token',
+        'notion_token',
+        'slack_token',
+      ] as const) {
+        const value = getPatchValue(key)
+        if (value !== undefined) {
+          patch[key] = value
+        }
+      }
 
-      const res = await fetch('/api/config', {
+      await apiFetch('/config', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success('Settings saved')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save')
@@ -469,15 +481,13 @@ export default function Settings() {
     setConnectionStatus('testing')
     setConnectionError(null)
     try {
-      const res = await fetch('/api/test-memories', {
+      const data = await apiFetch<{ connected?: boolean; error?: string }>('/test-memories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: config.memories_url,
-          api_key: config.memories_key && !config.memories_key.includes('****') ? config.memories_key : '',
+          api_key: config.memories_key.includes('****') ? '' : config.memories_key,
         }),
       })
-      const data = await res.json()
       if (data.connected) {
         setConnectionStatus('connected')
         setConnectionError(null)
@@ -611,6 +621,7 @@ export default function Settings() {
           {/* Model selectors */}
           <div className="grid grid-cols-2 gap-2">
             <ModelSelect
+              key={`fast-${provider}`}
               label="Fast Model"
               description="High-volume, low-cost"
               models={defaults.fastModels}
@@ -619,6 +630,7 @@ export default function Settings() {
               error={fieldError('fast_model', errors.fastModel)}
             />
             <ModelSelect
+              key={`deep-${provider}`}
               label="Deep Model"
               description="Low-volume, high-cost"
               models={defaults.deepModels}

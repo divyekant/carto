@@ -6,6 +6,7 @@
 // canonical constants (version, features, etc.).
 
 import { useEffect, useState } from 'react'
+import { apiFetch } from '@/lib/api'
 
 interface ColorEntry {
   name: string
@@ -86,9 +87,8 @@ export default function About() {
   const [data, setData] = useState<AboutData>(FALLBACK)
 
   useEffect(() => {
-    fetch('/api/about')
-      .then((r) => r.json())
-      .then((json: AboutData) => setData(json))
+    apiFetch<AboutData>('/about')
+      .then((json) => setData(json))
       .catch(() => {
         /* keep fallback */
       })
