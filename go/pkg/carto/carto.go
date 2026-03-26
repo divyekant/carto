@@ -109,7 +109,7 @@ func Query(text string, opts QueryOptions) ([]QueryResult, error) {
 		searchOpts.K = opts.K * 3
 	}
 
-	results, err := memoriesClient.Search(text, searchOpts)
+	results, err := memoriesClient.SearchAdvanced(text, searchOpts)
 	if err != nil {
 		return nil, fmt.Errorf("carto: query: %w", err)
 	}

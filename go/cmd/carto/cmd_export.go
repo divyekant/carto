@@ -94,7 +94,7 @@ func runExport(cmd *cobra.Command, _ []string) error {
 					ID:       r.ID,
 					Text:     r.Text,
 					Source:   r.Source,
-					Metadata: r.Meta,
+					Metadata: r.Metadata,
 				}
 				enc.Encode(entry) //nolint:errcheck
 			}

@@ -27,14 +27,38 @@ func (m *mockMemories) AddMemory(mem Memory) (int, error) {
 	return len(m.memories), nil
 }
 
-func (m *mockMemories) AddBatch(memories []Memory) error {
+func (m *mockMemories) UpsertBatch(memories []Memory) ([]UpsertResult, error) {
 	m.batches = append(m.batches, memories)
 	m.memories = append(m.memories, memories...)
+	results := make([]UpsertResult, len(memories))
+	for i := range memories {
+		results[i] = UpsertResult{ID: len(m.memories) - len(memories) + i + 1, Status: "created"}
+	}
+	return results, nil
+}
+
+func (m *mockMemories) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	return oldID + 1, nil
+}
+
+func (m *mockMemories) SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockMemories) DeleteMemory(id int) error {
 	return nil
 }
 
-func (m *mockMemories) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+func (m *mockMemories) CreateLink(fromID, toID int, linkType string) error {
+	return nil
+}
+
+func (m *mockMemories) GetLinks(id int) ([]Link, error) {
 	return nil, nil
+}
+
+func (m *mockMemories) DeleteLinks(id int) error {
+	return nil
 }
 
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]SearchResult, error) {

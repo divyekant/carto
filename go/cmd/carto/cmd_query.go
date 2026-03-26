@@ -62,7 +62,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	// Free-form search across all projects.
-	results, err := memoriesClient.Search(query, storage.SearchOptions{
+	results, err := memoriesClient.SearchAdvanced(query, storage.SearchOptions{
 		K:      count,
 		Hybrid: true,
 	})

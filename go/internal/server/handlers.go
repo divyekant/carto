@@ -147,7 +147,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		opts.K = req.K * 3
 	}
 
-	results, err := s.memoriesClient.Search(req.Text, opts)
+	results, err := s.memoriesClient.SearchAdvanced(req.Text, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

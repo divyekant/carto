@@ -86,18 +86,40 @@ func (m *mockMemories) AddMemory(mem storage.Memory) (int, error) {
 	return m.nextID, nil
 }
 
-func (m *mockMemories) AddBatch(memories []storage.Memory) error {
+func (m *mockMemories) UpsertBatch(memories []storage.Memory) ([]storage.UpsertResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var results []storage.UpsertResult
 	for _, mem := range memories {
 		m.nextID++
 		m.memories = append(m.memories, storedMemory{text: mem.Text, source: mem.Source})
+		results = append(results, storage.UpsertResult{ID: m.nextID, Status: "created"})
 	}
+	return results, nil
+}
+
+func (m *mockMemories) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	return oldID + 1, nil
+}
+
+func (m *mockMemories) SearchAdvanced(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockMemories) DeleteMemory(id int) error {
 	return nil
 }
 
-func (m *mockMemories) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+func (m *mockMemories) CreateLink(fromID, toID int, linkType string) error {
+	return nil
+}
+
+func (m *mockMemories) GetLinks(id int) ([]storage.Link, error) {
 	return nil, nil
+}
+
+func (m *mockMemories) DeleteLinks(id int) error {
+	return nil
 }
 
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
