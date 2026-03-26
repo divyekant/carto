@@ -19,6 +19,11 @@ func queryCmd() *cobra.Command {
 	cmd.Flags().String("project", "", "Project name to search within")
 	cmd.Flags().String("tier", "standard", "Context tier: mini, standard, full")
 	cmd.Flags().IntP("count", "k", 10, "Number of results")
+	cmd.Flags().Float64("graph-weight", 0.1, "Graph traversal weight (0-1)")
+	cmd.Flags().Float64("confidence-weight", 0.0, "Confidence decay weight (0-1)")
+	cmd.Flags().Float64("feedback-weight", 0.1, "Feedback signal weight (0-1)")
+	cmd.Flags().String("since", "", "Filter atoms after date (ISO 8601)")
+	cmd.Flags().String("until", "", "Filter atoms before date (ISO 8601)")
 	return cmd
 }
 
@@ -28,6 +33,11 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	project, _ := cmd.Flags().GetString("project")
 	tier, _ := cmd.Flags().GetString("tier")
 	count, _ := cmd.Flags().GetInt("count")
+	graphWeight, _ := cmd.Flags().GetFloat64("graph-weight")
+	confidenceWeight, _ := cmd.Flags().GetFloat64("confidence-weight")
+	feedbackWeight, _ := cmd.Flags().GetFloat64("feedback-weight")
+	since, _ := cmd.Flags().GetString("since")
+	until, _ := cmd.Flags().GetString("until")
 
 	cfg := config.Load()
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
@@ -63,8 +73,13 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 	// Free-form search across all projects.
 	results, err := memoriesClient.SearchAdvanced(query, storage.SearchOptions{
-		K:      count,
-		Hybrid: true,
+		K:                count,
+		Hybrid:           true,
+		GraphWeight:      graphWeight,
+		ConfidenceWeight: confidenceWeight,
+		FeedbackWeight:   feedbackWeight,
+		Since:            since,
+		Until:            until,
 	})
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
@@ -80,7 +95,11 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 		for i, r := range results {
 			snippet := truncateText(r.Text, 200)
-			fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, gold, reset, r.Source, gold, reset, r.Score)
+			graphTag := ""
+			if r.MatchType == "graph" {
+				graphTag = fmt.Sprintf(" %s[graph]%s", amber, reset)
+			}
+			fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f%s\n", bold, i+1, reset, gold, reset, r.Source, gold, reset, r.Score, graphTag)
 			fmt.Printf("   %s\n\n", snippet)
 		}
 	})
