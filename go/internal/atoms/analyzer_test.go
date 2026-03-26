@@ -67,6 +67,26 @@ const validResponse = `{
 	"exports": ["processData"]
 }`
 
+func TestAnalyzeChunk_LanguageField(t *testing.T) {
+	mock := &mockLLM{response: validResponse}
+	analyzer := NewAnalyzer(mock)
+
+	chunk := sampleChunk() // Language: "go"
+	atom, err := analyzer.AnalyzeChunk(chunk)
+	if err != nil {
+		t.Fatalf("AnalyzeChunk returned error: %v", err)
+	}
+
+	if atom.Language != chunk.Language {
+		t.Errorf("Language: got %q, want %q", atom.Language, chunk.Language)
+	}
+
+	// Module is intentionally unset by AnalyzeChunk (set by pipeline layer).
+	if atom.Module != "" {
+		t.Errorf("Module: expected empty string, got %q", atom.Module)
+	}
+}
+
 func TestAnalyzeChunk_Basic(t *testing.T) {
 	mock := &mockLLM{response: validResponse}
 	analyzer := NewAnalyzer(mock)

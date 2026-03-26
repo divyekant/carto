@@ -25,6 +25,8 @@ type Chunk struct {
 type Atom struct {
 	Name          string   `json:"name"`
 	Kind          string   `json:"kind"`
+	Language      string   `json:"language"`
+	Module        string   `json:"module"`
 	FilePath      string   `json:"file_path"`
 	Summary       string   `json:"summary"`
 	ClarifiedCode string   `json:"clarified_code"`
@@ -104,6 +106,7 @@ func (a *Analyzer) AnalyzeChunk(chunk Chunk) (*Atom, error) {
 	atom := &Atom{
 		Name:          chunk.Name,
 		Kind:          chunk.Kind,
+		Language:      chunk.Language,
 		FilePath:      chunk.FilePath,
 		Summary:       resp.Summary,
 		ClarifiedCode: resp.ClarifiedCode,
