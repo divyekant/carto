@@ -297,3 +297,84 @@ func TestMemoriesClient_Search_WithSourcePrefix(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 }
+
+func TestMemoriesClient_UpsertBatch(t *testing.T) {
+	var receivedBatches []map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/memory/upsert-batch" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		receivedBatches = append(receivedBatches, body)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": 100, "status": "created"},
+				{"id": 101, "status": "updated"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	results, err := client.UpsertBatch([]Memory{
+		{Text: "first", Source: "test/a"},
+		{Text: "second", Source: "test/b"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].ID != 100 {
+		t.Errorf("expected first id=100, got %d", results[0].ID)
+	}
+	if results[0].Status != "created" {
+		t.Errorf("expected first status=created, got %s", results[0].Status)
+	}
+	if results[1].ID != 101 {
+		t.Errorf("expected second id=101, got %d", results[1].ID)
+	}
+	if results[1].Status != "updated" {
+		t.Errorf("expected second status=updated, got %s", results[1].Status)
+	}
+}
+
+func TestMemoriesClient_Supersede(t *testing.T) {
+	var receivedBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/memory/supersede" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		json.NewEncoder(w).Encode(map[string]any{"new_id": 99})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	newID, err := client.Supersede(42, "updated text", map[string]any{"version": 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if newID != 99 {
+		t.Errorf("expected new_id=99, got %d", newID)
+	}
+	if receivedBody["old_id"] != float64(42) {
+		t.Errorf("expected old_id=42, got %v", receivedBody["old_id"])
+	}
+	if receivedBody["text"] != "updated text" {
+		t.Errorf("expected text='updated text', got '%v'", receivedBody["text"])
+	}
+}

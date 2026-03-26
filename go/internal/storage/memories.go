@@ -177,6 +177,84 @@ func (c *MemoriesClient) AddBatch(memories []Memory) error {
 	return firstErr
 }
 
+// UpsertBatch inserts or updates memories in chunks of batchSize.
+// Returns the UpsertResult for each memory processed.
+func (c *MemoriesClient) UpsertBatch(memories []Memory) ([]UpsertResult, error) {
+	var all []UpsertResult
+	total := (len(memories) + batchSize - 1) / batchSize
+
+	for i := 0; i < len(memories); i += batchSize {
+		end := i + batchSize
+		if end > len(memories) {
+			end = len(memories)
+		}
+		batch := memories[i:end]
+		batchNum := i/batchSize + 1
+
+		log.Printf("storage: upserting batch %d/%d (%d memories)", batchNum, total, len(batch))
+
+		payload := struct {
+			Memories []Memory `json:"memories"`
+		}{Memories: batch}
+
+		resp, err := c.request(http.MethodPost, "/memory/upsert-batch", payload)
+		if err != nil {
+			return all, fmt.Errorf("batch %d: %w", batchNum, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			text, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return all, fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
+		}
+
+		var result struct {
+			Results []UpsertResult `json:"results"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return all, fmt.Errorf("batch %d: decode response: %w", batchNum, err)
+		}
+		resp.Body.Close()
+
+		all = append(all, result.Results...)
+	}
+	return all, nil
+}
+
+// Supersede replaces an existing memory with new content, preserving lineage.
+// Returns the ID of the newly created memory.
+func (c *MemoriesClient) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	payload := struct {
+		OldID    int            `json:"old_id"`
+		Text     string         `json:"text"`
+		Metadata map[string]any `json:"metadata,omitempty"`
+	}{
+		OldID:    oldID,
+		Text:     newText,
+		Metadata: newMeta,
+	}
+
+	resp, err := c.request(http.MethodPost, "/memory/supersede", payload)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		NewID int `json:"new_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+	return result.NewID, nil
+}
+
 // Search queries the Memories index with the given options.
 func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
 	k := opts.K
