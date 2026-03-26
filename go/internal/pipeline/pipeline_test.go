@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"context"
 
@@ -64,9 +65,10 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 // ── Mock Memories API ──────────────────────────────────────────────────
 
 type storedMemory struct {
-	text     string
-	source   string
-	metadata map[string]any
+	text       string
+	source     string
+	metadata   map[string]any
+	documentAt string
 }
 
 type createdLink struct {
@@ -100,7 +102,12 @@ func (m *mockMemories) UpsertBatch(memories []storage.Memory) ([]storage.UpsertR
 	var results []storage.UpsertResult
 	for _, mem := range memories {
 		m.nextID++
-		m.memories = append(m.memories, storedMemory{text: mem.Text, source: mem.Source, metadata: mem.Metadata})
+		m.memories = append(m.memories, storedMemory{
+			text:       mem.Text,
+			source:     mem.Source,
+			metadata:   mem.Metadata,
+			documentAt: mem.DocumentAt,
+		})
 		results = append(results, storage.UpsertResult{ID: m.nextID, Status: "created"})
 	}
 	return results, nil
@@ -934,5 +941,115 @@ func TestRun_Phase5CreatesGraphLinks(t *testing.T) {
 		if !hasWiring {
 			t.Error("expected module analyses to have wiring edges from mock LLM")
 		}
+	}
+}
+
+func TestRun_AtomsHaveDocumentAt(t *testing.T) {
+	// Verify that UpsertBatch is called with DocumentAt set on atom memories.
+	// DocumentAt is derived from the file modification time (os.Stat).
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.AtomsCreated < 1 {
+		t.Fatalf("expected >= 1 atom, got %d", result.AtomsCreated)
+	}
+
+	// Every atom memory must have a non-empty DocumentAt in RFC3339 format.
+	memories := mem.getMemories()
+	atomsChecked := 0
+	for _, m := range memories {
+		if !strings.Contains(m.source, "layer:atoms") {
+			continue
+		}
+		if m.documentAt == "" {
+			t.Errorf("atom memory %q has empty DocumentAt; expected RFC3339 file mod time", m.source)
+		} else {
+			// Verify it parses as RFC3339.
+			if _, parseErr := time.Parse(time.RFC3339, m.documentAt); parseErr != nil {
+				t.Errorf("atom memory DocumentAt %q is not valid RFC3339: %v", m.documentAt, parseErr)
+			}
+		}
+		atomsChecked++
+	}
+	if atomsChecked < 1 {
+		t.Error("no atom memories found to check DocumentAt")
+	}
+}
+
+func TestRun_IncrementalUsesDeleteBySourceForRemovedFiles(t *testing.T) {
+	// Verify that the incremental path uses DeleteBySource targeting the atoms
+	// layer prefix rather than ClearModule (which would wipe all layers).
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	// First run to populate the manifest.
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	// Simulate a removed file by deleting util.go from disk.
+	// The manifest still knows about it, so DetectChanges will report it as Removed.
+	utilPath := filepath.Join(dir, "pkg", "util.go")
+	if err := os.Remove(utilPath); err != nil {
+		t.Fatalf("remove util.go: %v", err)
+	}
+
+	// Reset deletion tracking before the second run.
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.mu.Unlock()
+
+	_, err = Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	// Should have called DeleteBySource with the atoms layer prefix, not a broad module wipe.
+	deletions := mem.getDeletions()
+	if len(deletions) == 0 {
+		t.Fatal("expected DeleteBySource to be called when a file is removed in incremental mode")
+	}
+
+	// The deletion prefix must target layer:atoms specifically, not the entire module.
+	foundAtomsDelete := false
+	for _, d := range deletions {
+		if strings.Contains(d, "layer:atoms") {
+			foundAtomsDelete = true
+		}
+		// Must NOT be a broad module-level wipe (which would end with the module name only).
+		if strings.HasSuffix(d, "test-project/") {
+			t.Errorf("incremental delete should not wipe the entire project prefix: %q", d)
+		}
+	}
+	if !foundAtomsDelete {
+		t.Errorf("expected a DeleteBySource call targeting 'layer:atoms', got: %v", deletions)
 	}
 }

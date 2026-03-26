@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"context"
 
@@ -176,11 +177,14 @@ func Run(cfg Config) (*Result, error) {
 				files = append(changed.Added, changed.Modified...)
 
 				// Clean removed files from Memories.
+				// Delete only the atoms layer for this module so other layers
+				// (history, zones, etc.) are preserved for the unchanged files.
+				// New and modified atoms are added via UpsertBatch in Phase 2.
 				if len(changed.Removed) > 0 {
-					store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
-					if clearErr := store.ClearModule(mod.Name); clearErr != nil {
-						log.Printf("pipeline: warning: failed to clear module %s: %v", mod.Name, clearErr)
-						result.Errors = append(result.Errors, clearErr)
+					atomsPrefix := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mod.Name)
+					if _, delErr := cfg.MemoriesClient.DeleteBySource(atomsPrefix); delErr != nil {
+						log.Printf("pipeline: warning: failed to delete atoms for module %s: %v", mod.Name, delErr)
+						result.Errors = append(result.Errors, delErr)
 					}
 					// Remove from manifest.
 					for _, rp := range changed.Removed {
@@ -278,9 +282,15 @@ func Run(cfg Config) (*Result, error) {
 				}
 				memories := make([]storage.Memory, len(analyzed))
 				for j, a := range analyzed {
+					var docAt string
+					// a.FilePath is the absolute path set by the chunker.
+					if info, statErr := os.Stat(a.FilePath); statErr == nil {
+						docAt = info.ModTime().Format(time.RFC3339)
+					}
 					memories[j] = storage.Memory{
-						Text:   a.Summary + "\n\n" + a.ClarifiedCode,
-						Source: fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name),
+						Text:       a.Summary + "\n\n" + a.ClarifiedCode,
+						Source:     fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name),
+						DocumentAt: docAt,
 						Metadata: map[string]any{
 							"name":     a.Name,
 							"kind":     a.Kind,
