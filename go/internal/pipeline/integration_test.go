@@ -60,8 +60,8 @@ func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Co
 		return json.RawMessage(`{
 			"module_name": "",
 			"wiring": [
-				{"from": "main", "to": "pkg.Greet", "reason": "main calls Greet to produce output"},
-				{"from": "web.Logger", "to": "web.HandleRoot", "reason": "middleware wraps handler"}
+				{"from_atom": "main", "to_atom": "pkg.Greet", "from_module": "", "to_module": "", "link_type": "calls", "reason": "main calls Greet to produce output"},
+				{"from_atom": "web.Logger", "to_atom": "web.HandleRoot", "from_module": "", "to_module": "", "link_type": "wraps", "reason": "middleware wraps handler"}
 			],
 			"zones": [
 				{"name": "core", "intent": "main entry point and application bootstrap", "files": ["main.go"]},
@@ -379,7 +379,8 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	}
 
 	layers := mem.layersStored()
-	expectedLayers := []string{"atoms", "history", "signals", "wiring", "zones", "blueprint", "patterns"}
+	// "wiring" is now stored as graph links, not a text layer.
+	expectedLayers := []string{"atoms", "history", "signals", "zones", "blueprint", "patterns"}
 	for _, layer := range expectedLayers {
 		if !layers[layer] {
 			t.Errorf("layer %q was not stored in Memories (stored layers: %v)", layer, layers)
