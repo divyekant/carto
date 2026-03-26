@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/divyekant/carto/internal/config"
 	"github.com/divyekant/carto/internal/manifest"
+	"github.com/divyekant/carto/internal/storage"
 )
 
 func statusCmd() *cobra.Command {
@@ -49,11 +51,18 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		totalSize += entry.Size
 	}
 
+	// Fetch atom count from Memories (best-effort; degrade gracefully on error).
+	cfg := config.Load()
+	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
+	sourcePrefix := "carto/" + projectName + "/"
+	atomCount, memoriesErr := memoriesClient.Count(sourcePrefix)
+
 	type statusData struct {
 		Project   string `json:"project"`
 		Files     int    `json:"files"`
 		TotalSize string `json:"total_size"`
 		IndexedAt string `json:"indexed_at"`
+		Atoms     int    `json:"atoms"`
 	}
 
 	data := statusData{
@@ -61,14 +70,21 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		Files:     len(mf.Files),
 		TotalSize: formatBytes(totalSize),
 		IndexedAt: mf.IndexedAt.Format(time.RFC3339),
+		Atoms:     atomCount,
 	}
 
 	writeEnvelopeHuman(cmd, data, nil, func() {
 		fmt.Printf("%s%sIndex status for %s%s\n\n", bold, gold, absPath, reset)
+		if memoriesErr != nil {
+			fmt.Printf("  %sWarning:%s Memories unreachable (%s) — showing manifest data only.\n\n", amber, reset, memoriesErr)
+		}
 		fmt.Printf("  %sProject:%s     %s\n", gold, reset, data.Project)
 		fmt.Printf("  %sLast indexed:%s %s\n", gold, reset, data.IndexedAt)
 		fmt.Printf("  %sFiles:%s       %d\n", gold, reset, data.Files)
 		fmt.Printf("  %sTotal size:%s  %s\n", gold, reset, data.TotalSize)
+		if memoriesErr == nil {
+			fmt.Printf("  %sAtoms:%s       %d\n", gold, reset, data.Atoms)
+		}
 	})
 
 	return nil
