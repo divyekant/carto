@@ -8,7 +8,7 @@ import (
 	"github.com/divyekant/carto/internal/config"
 )
 
-var version = "1.1.0"
+var version = "2.0.0"
 
 func main() {
 	// Sync version into the config package so the server /api/health
@@ -75,6 +75,7 @@ Environment variables:
 	root.AddCommand(importCmd())         // import NDJSON index data
 	root.AddCommand(logsCmd())           // query and tail audit log
 	root.AddCommand(upgradeCmd())        // check for and install new versions
+	root.AddCommand(writebackCmd())      // file-level index updates without full re-index
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

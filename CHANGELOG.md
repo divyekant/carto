@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-03-26
+
+### Breaking Changes
+- Manifest format bumped to v2.0 — existing indexes require full re-index with `carto index`
+- Export/import NDJSON format includes `type` field — v1 exports incompatible
+- Wiring stored as graph links instead of JSON blobs
+
+### Added
+- `carto writeback` command for file-level index updates without full re-index
+- Structured atom metadata (name, kind, filepath, module, language) stored in Memories
+- Graph-native wiring via Memories v5 links (related_to, blocked_by, caused_by)
+- 6-signal search: graph weight, confidence, feedback, recency, vector, BM25
+- `--graph-weight`, `--confidence-weight`, `--feedback-weight`, `--since`, `--until` flags on `carto query`
+- `document_at` temporal field on atoms from file modification time
+- Web UI advanced search filters with graph/confidence result badges
+- `carto status` shows atom count from Memories with offline fallback
+
+### Changed
+- Atoms stored via `UpsertBatch` with metadata instead of text blob `AddBatch`
+- Incremental re-indexing uses targeted `DeleteBySource` instead of full module clear
+- Generated CLAUDE.md instructions use `carto writeback` instead of `memory_add`
+- Server query handler uses Memories server-side source filtering (removed 3x over-fetch)
+
+### Removed
+- `formatAtomEntry` function (atoms no longer stored as formatted text blobs)
+- Client-side source prefix filtering in query handler
+- `ListBySource` fallback in query handler
+
 ## [1.1.0] - 2026-03-01
 
 ### Added
