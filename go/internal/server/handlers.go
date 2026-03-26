@@ -98,18 +98,28 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 // queryRequest is the JSON body for POST /api/query.
 type queryRequest struct {
-	Text    string `json:"text"`
-	Project string `json:"project"`
-	Tier    string `json:"tier"`
-	K       int    `json:"k"`
+	Text             string  `json:"text"`
+	Project          string  `json:"project"`
+	Tier             string  `json:"tier"`
+	K                int     `json:"k"`
+	ConfidenceWeight float64 `json:"confidence_weight,omitempty"`
+	FeedbackWeight   float64 `json:"feedback_weight,omitempty"`
+	GraphWeight      float64 `json:"graph_weight,omitempty"`
+	Since            string  `json:"since,omitempty"`
+	Until            string  `json:"until,omitempty"`
 }
 
 // queryResultItem is a single result in the query response.
 type queryResultItem struct {
-	Text   string  `json:"text"`
-	Source string  `json:"source"`
-	Score  float64 `json:"score"`
-	Layer  string  `json:"layer,omitempty"`
+	ID           int            `json:"id,omitempty"`
+	Text         string         `json:"text"`
+	Source       string         `json:"source"`
+	Score        float64        `json:"score"`
+	Layer        string         `json:"layer,omitempty"`
+	MatchType    string         `json:"match_type,omitempty"`
+	Confidence   float64        `json:"confidence,omitempty"`
+	GraphSupport float64        `json:"graph_support,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // handleQuery searches the memories index. If a project is specified, it uses
@@ -135,16 +145,19 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search with optional project scoping via source prefix.
-	sourcePrefix := ""
+	// Memories performs server-side source-prefix filtering — no client-side
+	// filtering needed.
 	opts := storage.SearchOptions{
-		K:      req.K,
-		Hybrid: true,
+		K:                req.K,
+		Hybrid:           true,
+		ConfidenceWeight: req.ConfidenceWeight,
+		FeedbackWeight:   req.FeedbackWeight,
+		GraphWeight:      req.GraphWeight,
+		Since:            req.Since,
+		Until:            req.Until,
 	}
 	if req.Project != "" {
-		sourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
-		opts.SourcePrefix = sourcePrefix
-		// Request extra results so we have enough after filtering.
-		opts.K = req.K * 3
+		opts.SourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
 	}
 
 	results, err := s.memoriesClient.SearchAdvanced(req.Text, opts)
@@ -155,36 +168,16 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	var items []queryResultItem
 	for _, sr := range results {
-		if sourcePrefix != "" && !strings.HasPrefix(sr.Source, sourcePrefix) {
-			continue
-		}
 		items = append(items, queryResultItem{
-			Text:   sr.Text,
-			Source: sr.Source,
-			Score:  sr.Score,
+			ID:           sr.ID,
+			Text:         sr.Text,
+			Source:       sr.Source,
+			Score:        sr.Score,
+			MatchType:    sr.MatchType,
+			Confidence:   sr.Confidence,
+			GraphSupport: sr.GraphSupport,
+			Metadata:     sr.Metadata,
 		})
-		if len(items) >= req.K {
-			break
-		}
-	}
-
-	// Fallback: if search returned no project-matching results, use ListBySource
-	// to retrieve all memories for the project. This works around search APIs
-	// that don't support source-prefix filtering.
-	if len(items) == 0 && sourcePrefix != "" {
-		listed, listErr := s.memoriesClient.ListBySource(sourcePrefix, req.K*5, 0)
-		if listErr == nil {
-			for _, sr := range listed {
-				items = append(items, queryResultItem{
-					Text:   sr.Text,
-					Source: sr.Source,
-					Score:  sr.Score,
-				})
-				if len(items) >= req.K {
-					break
-				}
-			}
-		}
 	}
 
 	if items == nil {
