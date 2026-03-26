@@ -78,10 +78,9 @@ func TestMemoriesClient_AddMemory(t *testing.T) {
 
 	client := NewMemoriesClient(srv.URL, "secret-key-123")
 	id, err := client.AddMemory(Memory{
-		Text:        "Go is great",
-		Source:      "test/lang",
-		Metadata:    map[string]any{"lang": "go"},
-		Deduplicate: true,
+		Text:     "Go is great",
+		Source:   "test/lang",
+		Metadata: map[string]any{"lang": "go"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -100,9 +99,6 @@ func TestMemoriesClient_AddMemory(t *testing.T) {
 	}
 	if receivedBody["source"] != "test/lang" {
 		t.Errorf("expected source 'test/lang', got '%v'", receivedBody["source"])
-	}
-	if receivedBody["deduplicate"] != true {
-		t.Errorf("expected deduplicate=true, got %v", receivedBody["deduplicate"])
 	}
 }
 
@@ -159,8 +155,8 @@ func TestMemoriesClient_Search(t *testing.T) {
 	if results[0].Source != "src/a" {
 		t.Errorf("expected first result source='src/a', got '%s'", results[0].Source)
 	}
-	if results[0].Meta["key"] != "val" {
-		t.Errorf("expected first result meta key=val, got %v", results[0].Meta)
+	if results[0].Metadata["key"] != "val" {
+		t.Errorf("expected first result meta key=val, got %v", results[0].Metadata)
 	}
 	if results[1].ID != 2 {
 		t.Errorf("expected second result id=2, got %d", results[1].ID)

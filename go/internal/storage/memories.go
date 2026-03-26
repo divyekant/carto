@@ -14,27 +14,48 @@ import (
 
 // Memory represents a document to store in the Memories index.
 type Memory struct {
-	Text        string         `json:"text"`
-	Source      string         `json:"source"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Deduplicate bool           `json:"deduplicate"`
+	Text       string         `json:"text"`
+	Source     string         `json:"source"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	DocumentAt string         `json:"document_at,omitempty"`
 }
 
 // SearchResult represents a single result returned from Memories.
 type SearchResult struct {
-	ID     int            `json:"id"`
-	Text   string         `json:"text"`
-	Score  float64        `json:"score"`
-	Source string         `json:"source"`
-	Meta   map[string]any `json:"metadata,omitempty"`
+	ID           int            `json:"id"`
+	Text         string         `json:"text"`
+	Score        float64        `json:"score"`
+	Source       string         `json:"source"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	MatchType    string         `json:"match_type,omitempty"`
+	Confidence   float64        `json:"confidence,omitempty"`
+	GraphSupport float64        `json:"graph_support,omitempty"`
 }
 
 // SearchOptions controls search behaviour.
 type SearchOptions struct {
-	K            int     `json:"k,omitempty"`
-	Threshold    float64 `json:"threshold,omitempty"`
-	Hybrid       bool    `json:"hybrid,omitempty"`
-	SourcePrefix string  `json:"source_prefix,omitempty"`
+	K                int     `json:"k,omitempty"`
+	Threshold        float64 `json:"threshold,omitempty"`
+	Hybrid           bool    `json:"hybrid,omitempty"`
+	SourcePrefix     string  `json:"source_prefix,omitempty"`
+	ConfidenceWeight float64 `json:"confidence_weight,omitempty"`
+	FeedbackWeight   float64 `json:"feedback_weight,omitempty"`
+	GraphWeight      float64 `json:"graph_weight,omitempty"`
+	Since            string  `json:"since,omitempty"`
+	Until            string  `json:"until,omitempty"`
+}
+
+// UpsertResult represents the outcome of a single memory upsert.
+type UpsertResult struct {
+	ID     int    `json:"id"`
+	Status string `json:"status"`
+}
+
+// Link represents a graph edge between two memories.
+type Link struct {
+	ToID      int    `json:"to_id"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
 }
 
 // MemoriesClient talks to the Memories REST API.
