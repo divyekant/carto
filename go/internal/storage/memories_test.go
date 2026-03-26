@@ -378,3 +378,112 @@ func TestMemoriesClient_Supersede(t *testing.T) {
 		t.Errorf("expected text='updated text', got '%v'", receivedBody["text"])
 	}
 }
+
+func TestMemoriesClient_CreateLink(t *testing.T) {
+	var receivedBody map[string]any
+	var receivedPath string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	err := client.CreateLink(10, 20, "depends_on")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedPath != "/memory/10/link" {
+		t.Errorf("expected path '/memory/10/link', got '%s'", receivedPath)
+	}
+	if receivedBody["to_id"] != float64(20) {
+		t.Errorf("expected to_id=20, got %v", receivedBody["to_id"])
+	}
+	if receivedBody["type"] != "depends_on" {
+		t.Errorf("expected type='depends_on', got '%v'", receivedBody["type"])
+	}
+}
+
+func TestMemoriesClient_GetLinks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/memory/10/links" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"links": []map[string]any{
+				{"to_id": 20, "type": "depends_on", "created_at": "2026-01-01T00:00:00Z"},
+				{"to_id": 30, "type": "related_to", "created_at": "2026-01-02T00:00:00Z"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	links, err := client.GetLinks(10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(links) != 2 {
+		t.Fatalf("expected 2 links, got %d", len(links))
+	}
+	if links[0].ToID != 20 {
+		t.Errorf("expected first link to_id=20, got %d", links[0].ToID)
+	}
+	if links[0].Type != "depends_on" {
+		t.Errorf("expected first link type='depends_on', got '%s'", links[0].Type)
+	}
+	if links[1].ToID != 30 {
+		t.Errorf("expected second link to_id=30, got %d", links[1].ToID)
+	}
+}
+
+func TestMemoriesClient_DeleteLinks(t *testing.T) {
+	var deletedPaths []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/memory/10/links":
+			json.NewEncoder(w).Encode(map[string]any{
+				"links": []map[string]any{
+					{"to_id": 20, "type": "depends_on"},
+					{"to_id": 30, "type": "related_to"},
+				},
+			})
+		case r.Method == http.MethodDelete:
+			deletedPaths = append(deletedPaths, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	err := client.DeleteLinks(10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(deletedPaths) != 2 {
+		t.Fatalf("expected 2 deletes, got %d", len(deletedPaths))
+	}
+	if deletedPaths[0] != "/memory/10/link/20" {
+		t.Errorf("expected delete path '/memory/10/link/20', got '%s'", deletedPaths[0])
+	}
+	if deletedPaths[1] != "/memory/10/link/30" {
+		t.Errorf("expected delete path '/memory/10/link/30', got '%s'", deletedPaths[1])
+	}
+}

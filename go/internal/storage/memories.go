@@ -255,6 +255,76 @@ func (c *MemoriesClient) Supersede(oldID int, newText string, newMeta map[string
 	return result.NewID, nil
 }
 
+// CreateLink creates a directed graph edge from one memory to another.
+func (c *MemoriesClient) CreateLink(fromID, toID int, linkType string) error {
+	payload := struct {
+		ToID int    `json:"to_id"`
+		Type string `json:"type"`
+	}{
+		ToID: toID,
+		Type: linkType,
+	}
+
+	path := fmt.Sprintf("/memory/%d/link", fromID)
+	resp, err := c.request(http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+	return nil
+}
+
+// GetLinks returns all outgoing graph links from the given memory.
+func (c *MemoriesClient) GetLinks(id int) ([]Link, error) {
+	path := fmt.Sprintf("/memory/%d/links", id)
+	resp, err := c.request(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		Links []Link `json:"links"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result.Links, nil
+}
+
+// DeleteLinks removes all outgoing graph links from the given memory.
+func (c *MemoriesClient) DeleteLinks(id int) error {
+	links, err := c.GetLinks(id)
+	if err != nil {
+		return fmt.Errorf("get links: %w", err)
+	}
+
+	for _, link := range links {
+		path := fmt.Sprintf("/memory/%d/link/%d", id, link.ToID)
+		resp, err := c.request(http.MethodDelete, path, nil)
+		if err != nil {
+			return fmt.Errorf("delete link to %d: %w", link.ToID, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("delete link to %d: memories API error %d", link.ToID, resp.StatusCode)
+		}
+	}
+	return nil
+}
+
 // Search queries the Memories index with the given options.
 func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
 	k := opts.K
