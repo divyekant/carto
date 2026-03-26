@@ -41,10 +41,12 @@ Examples:
 
 // exportEntry is a single exported memory record.
 type exportEntry struct {
-	ID       int            `json:"id"`
-	Text     string         `json:"text"`
-	Source   string         `json:"source"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID         int            `json:"id"`
+	Type       string         `json:"type"`
+	Text       string         `json:"text"`
+	Source     string         `json:"source"`
+	DocumentAt string         `json:"document_at,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 func runExport(cmd *cobra.Command, _ []string) error {
@@ -89,9 +91,14 @@ func runExport(cmd *cobra.Command, _ []string) error {
 
 		if !jsonMode {
 			// Stream NDJSON: one entry per line.
+			// Note: link (graph edge) export is deferred — exporting links would
+			// require a separate API call per memory, which is too expensive at
+			// scale. Import via UpsertBatch will re-derive links on the next
+			// pipeline run.
 			for _, r := range results {
 				entry := exportEntry{
 					ID:       r.ID,
+					Type:     "atom",
 					Text:     r.Text,
 					Source:   r.Source,
 					Metadata: r.Metadata,

@@ -44,7 +44,9 @@ Examples:
 }
 
 // importRecord is a single NDJSON line from the import stream.
+// Type is optional — lines without a type are treated as atoms for backward compatibility.
 type importRecord struct {
+	Type     string         `json:"type,omitempty"`
 	Text     string         `json:"text"`
 	Source   string         `json:"source"`
 	Metadata map[string]any `json:"metadata,omitempty"`
