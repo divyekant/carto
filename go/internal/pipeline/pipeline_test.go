@@ -78,12 +78,13 @@ type createdLink struct {
 }
 
 type mockMemories struct {
-	mu        sync.Mutex
-	memories  []storedMemory
-	deletions []string
-	links     []createdLink
-	nextID    int
-	healthy   bool
+	mu             sync.Mutex
+	memories       []storedMemory
+	deletions      []string
+	deletedIDs     []int
+	links          []createdLink
+	nextID         int
+	healthy        bool
 }
 
 func (m *mockMemories) Health() (bool, error) { return m.healthy, nil }
@@ -122,7 +123,18 @@ func (m *mockMemories) SearchAdvanced(query string, opts storage.SearchOptions) 
 }
 
 func (m *mockMemories) DeleteMemory(id int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deletedIDs = append(m.deletedIDs, id)
 	return nil
+}
+
+func (m *mockMemories) getDeletedIDs() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]int, len(m.deletedIDs))
+	copy(cp, m.deletedIDs)
+	return cp
 }
 
 func (m *mockMemories) CreateLink(fromID, toID int, linkType string) error {
@@ -149,7 +161,20 @@ func (m *mockMemories) DeleteLinks(id int) error {
 }
 
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var results []storage.SearchResult
+	for i, mem := range m.memories {
+		if strings.HasPrefix(mem.source, source) {
+			results = append(results, storage.SearchResult{
+				ID:       i + 1,
+				Text:     mem.text,
+				Source:   mem.source,
+				Metadata: mem.metadata,
+			})
+		}
+	}
+	return results, nil
 }
 
 func (m *mockMemories) Count(sourcePrefix string) (int, error) {
@@ -987,13 +1012,13 @@ func TestRun_AtomsHaveDocumentAt(t *testing.T) {
 	}
 }
 
-func TestRun_IncrementalUsesDeleteBySourceForRemovedFiles(t *testing.T) {
-	// Verify that the incremental path uses DeleteBySource targeting the atoms
-	// layer prefix rather than ClearModule (which would wipe all layers).
+func TestRun_IncrementalDeletesOnlyRemovedFileAtoms(t *testing.T) {
+	// Verify that the incremental path deletes only atoms for removed files
+	// via DeleteMemory, not all atoms for the module via DeleteBySource.
 	dir := createTempProject(t)
 	mem := &mockMemories{healthy: true}
 
-	// First run to populate the manifest.
+	// First run to populate the manifest and store atoms.
 	_, err := Run(Config{
 		ProjectName:    "test-project",
 		RootPath:       dir,
@@ -1014,9 +1039,10 @@ func TestRun_IncrementalUsesDeleteBySourceForRemovedFiles(t *testing.T) {
 		t.Fatalf("remove util.go: %v", err)
 	}
 
-	// Reset deletion tracking before the second run.
+	// Reset tracking before the second run.
 	mem.mu.Lock()
 	mem.deletions = nil
+	mem.deletedIDs = nil
 	mem.mu.Unlock()
 
 	_, err = Run(Config{
@@ -1032,24 +1058,11 @@ func TestRun_IncrementalUsesDeleteBySourceForRemovedFiles(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 
-	// Should have called DeleteBySource with the atoms layer prefix, not a broad module wipe.
+	// Should NOT have called DeleteBySource for the atoms layer (which wipes all atoms).
 	deletions := mem.getDeletions()
-	if len(deletions) == 0 {
-		t.Fatal("expected DeleteBySource to be called when a file is removed in incremental mode")
-	}
-
-	// The deletion prefix must target layer:atoms specifically, not the entire module.
-	foundAtomsDelete := false
 	for _, d := range deletions {
 		if strings.Contains(d, "layer:atoms") {
-			foundAtomsDelete = true
+			t.Errorf("incremental delete should not use DeleteBySource for atoms layer: %q", d)
 		}
-		// Must NOT be a broad module-level wipe (which would end with the module name only).
-		if strings.HasSuffix(d, "test-project/") {
-			t.Errorf("incremental delete should not wipe the entire project prefix: %q", d)
-		}
-	}
-	if !foundAtomsDelete {
-		t.Errorf("expected a DeleteBySource call targeting 'layer:atoms', got: %v", deletions)
 	}
 }

@@ -177,14 +177,22 @@ func Run(cfg Config) (*Result, error) {
 				files = append(changed.Added, changed.Modified...)
 
 				// Clean removed files from Memories.
-				// Delete only the atoms layer for this module so other layers
-				// (history, zones, etc.) are preserved for the unchanged files.
-				// New and modified atoms are added via UpsertBatch in Phase 2.
+				// Delete only atoms belonging to the removed files, not the
+				// entire module's atoms layer. This preserves atoms for
+				// unchanged files.
 				if len(changed.Removed) > 0 {
 					atomsPrefix := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mod.Name)
-					if _, delErr := cfg.MemoriesClient.DeleteBySource(atomsPrefix); delErr != nil {
-						log.Printf("pipeline: warning: failed to delete atoms for module %s: %v", mod.Name, delErr)
-						result.Errors = append(result.Errors, delErr)
+					existing, listErr := cfg.MemoriesClient.ListBySource(atomsPrefix, 500, 0)
+					if listErr == nil {
+						removedSet := make(map[string]bool)
+						for _, rp := range changed.Removed {
+							removedSet[rp] = true
+						}
+						for _, mem := range existing {
+							if fp, ok := mem.Metadata["filepath"].(string); ok && removedSet[fp] {
+								cfg.MemoriesClient.DeleteMemory(mem.ID)
+							}
+						}
 					}
 					// Remove from manifest.
 					for _, rp := range changed.Removed {

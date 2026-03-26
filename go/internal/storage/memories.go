@@ -136,47 +136,6 @@ func (c *MemoriesClient) AddMemory(m Memory) (int, error) {
 
 const batchSize = 500
 
-// AddBatch stores memories in chunks of batchSize. The Memories server handles
-// internal chunking. Continues on individual batch failures and returns the
-// first error encountered.
-func (c *MemoriesClient) AddBatch(memories []Memory) error {
-	total := (len(memories) + batchSize - 1) / batchSize
-	var firstErr error
-	for i := 0; i < len(memories); i += batchSize {
-		end := i + batchSize
-		if end > len(memories) {
-			end = len(memories)
-		}
-		batch := memories[i:end]
-		batchNum := i/batchSize + 1
-
-		log.Printf("storage: storing batch %d/%d (%d memories)", batchNum, total, len(batch))
-
-		payload := struct {
-			Memories []Memory `json:"memories"`
-		}{Memories: batch}
-
-		resp, err := c.request(http.MethodPost, "/memory/add-batch", payload)
-		if err != nil {
-			log.Printf("storage: warning: batch %d/%d failed: %v", batchNum, total, err)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("batch %d: %w", batchNum, err)
-			}
-			continue
-		}
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			text, _ := io.ReadAll(resp.Body)
-			log.Printf("storage: warning: batch %d/%d returned %d: %s", batchNum, total, resp.StatusCode, text)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
-			}
-		}
-	}
-	return firstErr
-}
-
 // UpsertBatch inserts or updates memories in chunks of batchSize.
 // Returns the UpsertResult for each memory processed.
 func (c *MemoriesClient) UpsertBatch(memories []Memory) ([]UpsertResult, error) {
@@ -272,7 +231,7 @@ func (c *MemoriesClient) CreateLink(fromID, toID int, linkType string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		text, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
 	}
@@ -303,23 +262,26 @@ func (c *MemoriesClient) GetLinks(id int) ([]Link, error) {
 }
 
 // DeleteLinks removes all outgoing graph links from the given memory.
+// Best-effort: logs warnings on failures and continues.
 func (c *MemoriesClient) DeleteLinks(id int) error {
 	links, err := c.GetLinks(id)
 	if err != nil {
-		return fmt.Errorf("get links: %w", err)
+		log.Printf("storage: warning: get links for %d: %v", id, err)
+		return nil
 	}
 
 	for _, link := range links {
 		path := fmt.Sprintf("/memory/%d/link/%d", id, link.ToID)
 		resp, err := c.request(http.MethodDelete, path, nil)
 		if err != nil {
-			return fmt.Errorf("delete link to %d: %w", link.ToID, err)
+			log.Printf("storage: warning: delete link %d->%d: %v", id, link.ToID, err)
+			continue
 		}
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("delete link to %d: memories API error %d", link.ToID, resp.StatusCode)
+			log.Printf("storage: warning: delete link %d->%d: API error %d", id, link.ToID, resp.StatusCode)
 		}
 	}
 	return nil
