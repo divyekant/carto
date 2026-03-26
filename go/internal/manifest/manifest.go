@@ -41,7 +41,7 @@ type ChangeSet struct {
 // The manifest file path is set to {projectRoot}/.carto/manifest.json.
 func NewManifest(projectRoot, projectName string) *Manifest {
 	return &Manifest{
-		Version: "1.0",
+		Version: "2.0",
 		Project: projectName,
 		Files:   make(map[string]FileEntry),
 		path:    filepath.Join(projectRoot, ".carto", "manifest.json"),
@@ -78,6 +78,10 @@ func Load(projectRoot string) (*Manifest, error) {
 		return nil, fmt.Errorf("unmarshal manifest: %w", err)
 	}
 	m.path = p
+
+	if m.Version == "1.0" {
+		return nil, fmt.Errorf("manifest: v1.0 format detected — run 'carto index' to upgrade to v2 format")
+	}
 
 	if m.Files == nil {
 		m.Files = make(map[string]FileEntry)
