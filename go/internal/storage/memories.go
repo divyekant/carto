@@ -325,25 +325,41 @@ func (c *MemoriesClient) DeleteLinks(id int) error {
 	return nil
 }
 
-// Search queries the Memories index with the given options.
-func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+// SearchAdvanced queries the Memories index with full 6-signal support.
+// Only non-zero option fields are included in the request body.
+func (c *MemoriesClient) SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error) {
 	k := opts.K
 	if k == 0 {
 		k = 10
 	}
 
-	payload := struct {
-		Query        string  `json:"query"`
-		K            int     `json:"k"`
-		Threshold    float64 `json:"threshold,omitempty"`
-		Hybrid       bool    `json:"hybrid"`
-		SourcePrefix string  `json:"source_prefix,omitempty"`
-	}{
-		Query:        query,
-		K:            k,
-		Threshold:    opts.Threshold,
-		Hybrid:       opts.Hybrid,
-		SourcePrefix: opts.SourcePrefix,
+	payload := map[string]any{
+		"query": query,
+		"k":     k,
+	}
+	if opts.Threshold != 0 {
+		payload["threshold"] = opts.Threshold
+	}
+	if opts.Hybrid {
+		payload["hybrid"] = opts.Hybrid
+	}
+	if opts.SourcePrefix != "" {
+		payload["source_prefix"] = opts.SourcePrefix
+	}
+	if opts.ConfidenceWeight != 0 {
+		payload["confidence_weight"] = opts.ConfidenceWeight
+	}
+	if opts.FeedbackWeight != 0 {
+		payload["feedback_weight"] = opts.FeedbackWeight
+	}
+	if opts.GraphWeight != 0 {
+		payload["graph_weight"] = opts.GraphWeight
+	}
+	if opts.Since != "" {
+		payload["since"] = opts.Since
+	}
+	if opts.Until != "" {
+		payload["until"] = opts.Until
 	}
 
 	resp, err := c.request(http.MethodPost, "/search", payload)

@@ -102,7 +102,7 @@ func TestMemoriesClient_AddMemory(t *testing.T) {
 	}
 }
 
-func TestMemoriesClient_Search(t *testing.T) {
+func TestMemoriesClient_SearchAdvanced_Basic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -132,7 +132,7 @@ func TestMemoriesClient_Search(t *testing.T) {
 	defer srv.Close()
 
 	client := NewMemoriesClient(srv.URL, "test-key")
-	results, err := client.Search("test query", SearchOptions{
+	results, err := client.SearchAdvanced("test query", SearchOptions{
 		K:      5,
 		Hybrid: true,
 	})
@@ -267,7 +267,7 @@ func TestMemoriesClient_ListBySource_WithOffset(t *testing.T) {
 	}
 }
 
-func TestMemoriesClient_Search_WithSourcePrefix(t *testing.T) {
+func TestMemoriesClient_SearchAdvanced_WithSourcePrefix(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
@@ -285,7 +285,7 @@ func TestMemoriesClient_Search_WithSourcePrefix(t *testing.T) {
 	defer srv.Close()
 
 	client := NewMemoriesClient(srv.URL, "test-key")
-	results, err := client.Search("test", SearchOptions{
+	results, err := client.SearchAdvanced("test", SearchOptions{
 		K:            5,
 		SourcePrefix: "carto/proj/",
 	})
@@ -485,5 +485,100 @@ func TestMemoriesClient_DeleteLinks(t *testing.T) {
 	}
 	if deletedPaths[1] != "/memory/10/link/30" {
 		t.Errorf("expected delete path '/memory/10/link/30', got '%s'", deletedPaths[1])
+	}
+}
+
+func TestMemoriesClient_SearchAdvanced(t *testing.T) {
+	var receivedBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/search" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{
+					"id":            1,
+					"text":          "result one",
+					"score":         0.95,
+					"source":        "src/a",
+					"metadata":      map[string]any{"key": "val"},
+					"match_type":    "hybrid",
+					"confidence":    0.88,
+					"graph_support": 0.72,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	results, err := client.SearchAdvanced("test query", SearchOptions{
+		K:                10,
+		Threshold:        0.5,
+		Hybrid:           true,
+		SourcePrefix:     "carto/proj/",
+		ConfidenceWeight: 0.3,
+		FeedbackWeight:   0.2,
+		GraphWeight:      0.1,
+		Since:            "2026-01-01",
+		Until:            "2026-03-01",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all 6 signal weights are sent
+	if receivedBody["query"] != "test query" {
+		t.Errorf("expected query='test query', got '%v'", receivedBody["query"])
+	}
+	if receivedBody["k"] != float64(10) {
+		t.Errorf("expected k=10, got %v", receivedBody["k"])
+	}
+	if receivedBody["threshold"] != 0.5 {
+		t.Errorf("expected threshold=0.5, got %v", receivedBody["threshold"])
+	}
+	if receivedBody["hybrid"] != true {
+		t.Errorf("expected hybrid=true, got %v", receivedBody["hybrid"])
+	}
+	if receivedBody["source_prefix"] != "carto/proj/" {
+		t.Errorf("expected source_prefix='carto/proj/', got '%v'", receivedBody["source_prefix"])
+	}
+	if receivedBody["confidence_weight"] != 0.3 {
+		t.Errorf("expected confidence_weight=0.3, got %v", receivedBody["confidence_weight"])
+	}
+	if receivedBody["feedback_weight"] != 0.2 {
+		t.Errorf("expected feedback_weight=0.2, got %v", receivedBody["feedback_weight"])
+	}
+	if receivedBody["graph_weight"] != 0.1 {
+		t.Errorf("expected graph_weight=0.1, got %v", receivedBody["graph_weight"])
+	}
+	if receivedBody["since"] != "2026-01-01" {
+		t.Errorf("expected since='2026-01-01', got '%v'", receivedBody["since"])
+	}
+	if receivedBody["until"] != "2026-03-01" {
+		t.Errorf("expected until='2026-03-01', got '%v'", receivedBody["until"])
+	}
+
+	// Verify result fields
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].MatchType != "hybrid" {
+		t.Errorf("expected match_type='hybrid', got '%s'", results[0].MatchType)
+	}
+	if results[0].Confidence != 0.88 {
+		t.Errorf("expected confidence=0.88, got %f", results[0].Confidence)
+	}
+	if results[0].GraphSupport != 0.72 {
+		t.Errorf("expected graph_support=0.72, got %f", results[0].GraphSupport)
+	}
+	if results[0].Metadata["key"] != "val" {
+		t.Errorf("expected metadata key=val, got %v", results[0].Metadata)
 	}
 }
