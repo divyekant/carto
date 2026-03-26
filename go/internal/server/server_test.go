@@ -153,7 +153,7 @@ func TestListProjects(t *testing.T) {
 	projADir := filepath.Join(tmpDir, "projA")
 	os.MkdirAll(filepath.Join(projADir, ".carto"), 0o755)
 	mfA := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projA",
 		"indexed_at": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
 		"files": map[string]any{
@@ -168,7 +168,7 @@ func TestListProjects(t *testing.T) {
 	projBDir := filepath.Join(tmpDir, "projB")
 	os.MkdirAll(filepath.Join(projBDir, ".carto"), 0o755)
 	mfB := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projB",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -838,7 +838,7 @@ func TestGetProjectDetail(t *testing.T) {
 
 	// Write a manifest.
 	mf := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "myproj",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -903,7 +903,7 @@ func TestDeleteProject(t *testing.T) {
 	projDir := filepath.Join(tmp, "myproj")
 	cartoDir := filepath.Join(projDir, ".carto")
 	os.MkdirAll(cartoDir, 0o755)
-	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"1.0"}`), 0o644)
+	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"2.0"}`), 0o644)
 
 	srv := New(config.Config{}, nil, tmp, nil)
 
