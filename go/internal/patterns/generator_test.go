@@ -117,17 +117,11 @@ func TestGenerateCLAUDE_ContainsSections(t *testing.T) {
 	if !strings.Contains(output, "memory_search") {
 		t.Error("output should contain MCP memory_search instruction")
 	}
-	if !strings.Contains(output, "memory_add") {
-		t.Error("output should contain MCP memory_add instruction")
-	}
 	if !strings.Contains(output, "$MEMORIES_URL/search") {
 		t.Error("output should contain curl search fallback")
 	}
-	if !strings.Contains(output, "$MEMORIES_URL/memory/add") {
-		t.Error("output should contain curl write-back fallback")
-	}
-	if !strings.Contains(output, "Summary:") {
-		t.Error("output should contain atom format with Summary field")
+	if !strings.Contains(output, "carto writeback MyProject --file <changed-file>") {
+		t.Error("output should contain carto writeback instruction")
 	}
 	if !strings.Contains(output, "### Follow Discovered Patterns") {
 		t.Error("output should contain Follow Discovered Patterns subsection")
@@ -229,8 +223,8 @@ func TestGenerateCursorRules_ContainsSections(t *testing.T) {
 	if !strings.Contains(output, "$MEMORIES_URL/search") {
 		t.Error("output should contain search curl command")
 	}
-	if !strings.Contains(output, "$MEMORIES_URL/memory/add") {
-		t.Error("output should contain write-back curl command")
+	if !strings.Contains(output, "carto writeback MyProject --file <changed-file>") {
+		t.Error("output should contain carto writeback command")
 	}
 }
 
