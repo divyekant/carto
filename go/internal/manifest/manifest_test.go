@@ -27,8 +27,8 @@ func TestNewManifest(t *testing.T) {
 	}
 
 	// Version set
-	if m.Version != "1.0" {
-		t.Errorf("Version = %q, want %q", m.Version, "1.0")
+	if m.Version != "2.0" {
+		t.Errorf("Version = %q, want %q", m.Version, "2.0")
 	}
 
 	// Project name set
@@ -57,8 +57,8 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Errorf("Project = %q, want %q", loaded.Project, "test-project")
 	}
 
-	if loaded.Version != "1.0" {
-		t.Errorf("Version = %q, want %q", loaded.Version, "1.0")
+	if loaded.Version != "2.0" {
+		t.Errorf("Version = %q, want %q", loaded.Version, "2.0")
 	}
 
 	if len(loaded.Files) != 2 {
@@ -309,6 +309,37 @@ func TestIsEmpty(t *testing.T) {
 
 	if m.IsEmpty() {
 		t.Error("manifest with a file should not be empty")
+	}
+}
+
+func TestManifest_VersionV2(t *testing.T) {
+	root := t.TempDir()
+	m := NewManifest(root, "v2-project")
+
+	if m.Version != "2.0" {
+		t.Errorf("Version = %q, want %q", m.Version, "2.0")
+	}
+}
+
+func TestManifest_LoadV1ReturnsError(t *testing.T) {
+	root := t.TempDir()
+	cartoDir := filepath.Join(root, ".carto")
+	if err := os.MkdirAll(cartoDir, 0o755); err != nil {
+		t.Fatalf("mkdir .carto: %v", err)
+	}
+
+	v1JSON := `{"version":"1.0","project":"old-project","files":{}}`
+	manifestPath := filepath.Join(cartoDir, "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(v1JSON), 0o644); err != nil {
+		t.Fatalf("write v1 manifest: %v", err)
+	}
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load should return an error for v1.0 manifest, got nil")
+	}
+	if !strings.Contains(err.Error(), "upgrade") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "upgrade")
 	}
 }
 

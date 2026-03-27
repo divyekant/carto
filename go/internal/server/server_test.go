@@ -153,7 +153,7 @@ func TestListProjects(t *testing.T) {
 	projADir := filepath.Join(tmpDir, "projA")
 	os.MkdirAll(filepath.Join(projADir, ".carto"), 0o755)
 	mfA := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projA",
 		"indexed_at": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
 		"files": map[string]any{
@@ -168,7 +168,7 @@ func TestListProjects(t *testing.T) {
 	projBDir := filepath.Join(tmpDir, "projB")
 	os.MkdirAll(filepath.Join(projBDir, ".carto"), 0o755)
 	mfB := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projB",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -265,31 +265,21 @@ func TestQueryEndpoint(t *testing.T) {
 	}
 }
 
-func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
-	// Simulates the real-world issue: search returns results from non-matching
-	// sources (e.g. "claude-code/..."), so the project source prefix filter
-	// drops everything. The handler should fall back to ListBySource.
+func TestQueryEndpoint_SourcePrefixPassedToMemories(t *testing.T) {
+	// Verifies that when a project is specified, the handler passes the
+	// source_prefix to Memories for server-side filtering and returns whatever
+	// Memories returns — no client-side filtering or ListBySource fallback.
+	var capturedBody map[string]any
 	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.URL.Path == "/search" && r.Method == http.MethodPost {
-			// Search returns results from non-matching sources.
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			// Memories returns pre-filtered results (server-side).
 			json.NewEncoder(w).Encode(map[string]any{
 				"results": []map[string]any{
-					{"id": 100, "text": "Auth handling", "score": 0.9, "source": "claude-code/myproj"},
-					{"id": 101, "text": "Login flow", "score": 0.8, "source": "learning/myproj"},
-				},
-			})
-			return
-		}
-
-		if r.URL.Path == "/memories" && r.Method == http.MethodGet {
-			// ListBySource returns project memories for the carto source prefix.
-			json.NewEncoder(w).Encode(map[string]any{
-				"memories": []map[string]any{
-					{"id": 50, "text": "Authentication module handles JWT and session tokens", "source": "carto/myproj/auth/layer:atoms"},
-					{"id": 51, "text": "Blueprint: auth + api + storage", "source": "carto/myproj/_system/layer:blueprint"},
-					{"id": 52, "text": "Zones: auth, api, db", "source": "carto/myproj/auth/layer:zones"},
+					{"id": 50, "text": "Authentication module handles JWT", "score": 0.92, "source": "carto/myproj/auth/layer:atoms"},
+					{"id": 51, "text": "Blueprint: auth + api + storage", "score": 0.85, "source": "carto/myproj/_system/layer:blueprint"},
 				},
 			})
 			return
@@ -313,6 +303,11 @@ func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// Verify source_prefix was sent to Memories.
+	if capturedBody["source_prefix"] != "carto/myproj/" {
+		t.Errorf("expected source_prefix 'carto/myproj/' sent to Memories, got %v", capturedBody["source_prefix"])
+	}
+
 	var resp map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -323,18 +318,9 @@ func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
 		t.Fatalf("expected results array, got %T", resp["results"])
 	}
 
-	// Should have 3 results from the fallback ListBySource.
-	if len(results) != 3 {
-		t.Errorf("expected 3 results from ListBySource fallback, got %d", len(results))
-	}
-
-	// Verify results have correct source prefix.
-	for _, r := range results {
-		item := r.(map[string]any)
-		src := item["source"].(string)
-		if !strings.HasPrefix(src, "carto/myproj/") {
-			t.Errorf("expected source with carto/myproj/ prefix, got %q", src)
-		}
+	// Should return exactly what Memories returned — no client-side filtering.
+	if len(results) != 2 {
+		t.Errorf("expected 2 results from Memories, got %d", len(results))
 	}
 }
 
@@ -838,7 +824,7 @@ func TestGetProjectDetail(t *testing.T) {
 
 	// Write a manifest.
 	mf := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "myproj",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -903,7 +889,7 @@ func TestDeleteProject(t *testing.T) {
 	projDir := filepath.Join(tmp, "myproj")
 	cartoDir := filepath.Join(projDir, ".carto")
 	os.MkdirAll(cartoDir, 0o755)
-	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"1.0"}`), 0o644)
+	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"2.0"}`), 0o644)
 
 	srv := New(config.Config{}, nil, tmp, nil)
 

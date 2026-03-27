@@ -22,6 +22,10 @@ interface Result {
   text: string
   score: number
   source: string
+  match_type?: string
+  confidence?: number
+  graph_support?: number
+  metadata?: Record<string, string>
 }
 
 const QUICK_QUERIES = [
@@ -45,6 +49,14 @@ export default function Query() {
   const [searched, setSearched] = useState(false)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
+  // Advanced filter state
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [graphWeight, setGraphWeight] = useState(0.1)
+  const [confidenceWeight, setConfidenceWeight] = useState(0)
+  const [feedbackWeight, setFeedbackWeight] = useState(0.1)
+  const [since, setSince] = useState('')
+  const [until, setUntil] = useState('')
+
   useEffect(() => {
     fetch('/api/projects')
       .then(r => r.json())
@@ -67,7 +79,16 @@ export default function Query() {
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text.trim(), project, tier, k }),
+        body: JSON.stringify({
+          text: text.trim(), project, tier, k,
+          ...(showAdvanced && {
+            graph_weight: graphWeight,
+            confidence_weight: confidenceWeight,
+            feedback_weight: feedbackWeight,
+            ...(since && { since }),
+            ...(until && { until }),
+          }),
+        }),
       })
       const data = await res.json()
       setResults(data.results || [])
@@ -152,6 +173,91 @@ export default function Query() {
             {searching ? 'Searching...' : 'Search'}
           </Button>
         </div>
+
+        {/* Advanced Filters toggle */}
+        <div className="mt-3">
+          <button
+            onClick={() => setShowAdvanced(v => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          >
+            <span className={cn('transition-transform', showAdvanced ? 'rotate-90' : '')}>▶</span>
+            Advanced Filters
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-3 p-3 rounded-md border border-border bg-muted/30 flex flex-wrap gap-4">
+              <div className="flex flex-col gap-1 min-w-[120px]">
+                <Label className="text-xs font-medium">Graph Weight</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={graphWeight}
+                    onChange={(e) => setGraphWeight(Number(e.target.value))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-muted-foreground w-6">{graphWeight.toFixed(1)}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1 min-w-[120px]">
+                <Label className="text-xs font-medium">Confidence Weight</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={confidenceWeight}
+                    onChange={(e) => setConfidenceWeight(Number(e.target.value))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-muted-foreground w-6">{confidenceWeight.toFixed(1)}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1 min-w-[120px]">
+                <Label className="text-xs font-medium">Feedback Weight</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={feedbackWeight}
+                    onChange={(e) => setFeedbackWeight(Number(e.target.value))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-muted-foreground w-6">{feedbackWeight.toFixed(1)}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="since" className="text-xs font-medium">Since</Label>
+                <Input
+                  id="since"
+                  type="date"
+                  value={since}
+                  onChange={(e) => setSince(e.target.value)}
+                  className="h-8 text-xs w-36"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="until" className="text-xs font-medium">Until</Label>
+                <Input
+                  id="until"
+                  type="date"
+                  value={until}
+                  onChange={(e) => setUntil(e.target.value)}
+                  className="h-8 text-xs w-36"
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </Section>
 
       {!searched && (
@@ -174,7 +280,16 @@ export default function Query() {
       {searched && results.length > 0 && (
         <Section title={`Results (${results.length} matches)`} className="mt-6">
           {results.slice(0, visibleCount).map((r, i) => (
-            <QueryResult key={r.id || i} index={i + 1} source={r.source} score={r.score} text={r.text} />
+            <QueryResult
+              key={r.id || i}
+              index={i + 1}
+              source={r.source}
+              score={r.score}
+              text={r.text}
+              matchType={r.match_type}
+              confidence={r.confidence}
+              metadata={r.metadata}
+            />
           ))}
           {results.length > visibleCount && (
             <div className="text-center py-3">

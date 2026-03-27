@@ -14,27 +14,49 @@ import (
 
 // Memory represents a document to store in the Memories index.
 type Memory struct {
-	Text        string         `json:"text"`
-	Source      string         `json:"source"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Deduplicate bool           `json:"deduplicate"`
+	Text       string         `json:"text"`
+	Source     string         `json:"source"`
+	Key        string         `json:"key,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	DocumentAt string         `json:"document_at,omitempty"`
 }
 
 // SearchResult represents a single result returned from Memories.
 type SearchResult struct {
-	ID     int            `json:"id"`
-	Text   string         `json:"text"`
-	Score  float64        `json:"score"`
-	Source string         `json:"source"`
-	Meta   map[string]any `json:"metadata,omitempty"`
+	ID           int            `json:"id"`
+	Text         string         `json:"text"`
+	Score        float64        `json:"score"`
+	Source       string         `json:"source"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	MatchType    string         `json:"match_type,omitempty"`
+	Confidence   float64        `json:"confidence,omitempty"`
+	GraphSupport float64        `json:"graph_support,omitempty"`
 }
 
 // SearchOptions controls search behaviour.
 type SearchOptions struct {
-	K            int     `json:"k,omitempty"`
-	Threshold    float64 `json:"threshold,omitempty"`
-	Hybrid       bool    `json:"hybrid,omitempty"`
-	SourcePrefix string  `json:"source_prefix,omitempty"`
+	K                int     `json:"k,omitempty"`
+	Threshold        float64 `json:"threshold,omitempty"`
+	Hybrid           bool    `json:"hybrid,omitempty"`
+	SourcePrefix     string  `json:"source_prefix,omitempty"`
+	ConfidenceWeight float64 `json:"confidence_weight,omitempty"`
+	FeedbackWeight   float64 `json:"feedback_weight,omitempty"`
+	GraphWeight      float64 `json:"graph_weight,omitempty"`
+	Since            string  `json:"since,omitempty"`
+	Until            string  `json:"until,omitempty"`
+}
+
+// UpsertResult represents the outcome of a single memory upsert.
+type UpsertResult struct {
+	ID     int    `json:"id"`
+	Status string `json:"status"`
+}
+
+// Link represents a graph edge between two memories.
+type Link struct {
+	ToID      int    `json:"to_id"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
 }
 
 // MemoriesClient talks to the Memories REST API.
@@ -115,12 +137,12 @@ func (c *MemoriesClient) AddMemory(m Memory) (int, error) {
 
 const batchSize = 500
 
-// AddBatch stores memories in chunks of batchSize. The Memories server handles
-// internal chunking. Continues on individual batch failures and returns the
-// first error encountered.
-func (c *MemoriesClient) AddBatch(memories []Memory) error {
+// UpsertBatch inserts or updates memories in chunks of batchSize.
+// Returns the UpsertResult for each memory processed.
+func (c *MemoriesClient) UpsertBatch(memories []Memory) ([]UpsertResult, error) {
+	var all []UpsertResult
 	total := (len(memories) + batchSize - 1) / batchSize
-	var firstErr error
+
 	for i := 0; i < len(memories); i += batchSize {
 		end := i + batchSize
 		if end > len(memories) {
@@ -129,52 +151,178 @@ func (c *MemoriesClient) AddBatch(memories []Memory) error {
 		batch := memories[i:end]
 		batchNum := i/batchSize + 1
 
-		log.Printf("storage: storing batch %d/%d (%d memories)", batchNum, total, len(batch))
+		log.Printf("storage: upserting batch %d/%d (%d memories)", batchNum, total, len(batch))
 
 		payload := struct {
 			Memories []Memory `json:"memories"`
 		}{Memories: batch}
 
-		resp, err := c.request(http.MethodPost, "/memory/add-batch", payload)
+		resp, err := c.request(http.MethodPost, "/memory/upsert-batch", payload)
 		if err != nil {
-			log.Printf("storage: warning: batch %d/%d failed: %v", batchNum, total, err)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("batch %d: %w", batchNum, err)
-			}
-			continue
+			return all, fmt.Errorf("batch %d: %w", batchNum, err)
 		}
-		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			text, _ := io.ReadAll(resp.Body)
-			log.Printf("storage: warning: batch %d/%d returned %d: %s", batchNum, total, resp.StatusCode, text)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
-			}
+			resp.Body.Close()
+			return all, fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
 		}
+
+		var result struct {
+			Results []UpsertResult `json:"results"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return all, fmt.Errorf("batch %d: decode response: %w", batchNum, err)
+		}
+		resp.Body.Close()
+
+		all = append(all, result.Results...)
 	}
-	return firstErr
+	return all, nil
 }
 
-// Search queries the Memories index with the given options.
-func (c *MemoriesClient) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+// Supersede replaces an existing memory with new content, preserving lineage.
+// Returns the ID of the newly created memory.
+func (c *MemoriesClient) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	payload := struct {
+		OldID    int            `json:"old_id"`
+		Text     string         `json:"text"`
+		Metadata map[string]any `json:"metadata,omitempty"`
+	}{
+		OldID:    oldID,
+		Text:     newText,
+		Metadata: newMeta,
+	}
+
+	resp, err := c.request(http.MethodPost, "/memory/supersede", payload)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		NewID int `json:"new_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+	return result.NewID, nil
+}
+
+// CreateLink creates a directed graph edge from one memory to another.
+func (c *MemoriesClient) CreateLink(fromID, toID int, linkType string) error {
+	payload := struct {
+		ToID int    `json:"to_id"`
+		Type string `json:"type"`
+	}{
+		ToID: toID,
+		Type: linkType,
+	}
+
+	path := fmt.Sprintf("/memory/%d/link", fromID)
+	resp, err := c.request(http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+	return nil
+}
+
+// GetLinks returns all outgoing graph links from the given memory.
+func (c *MemoriesClient) GetLinks(id int) ([]Link, error) {
+	path := fmt.Sprintf("/memory/%d/links", id)
+	resp, err := c.request(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		text, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+	}
+
+	var result struct {
+		Links []Link `json:"links"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result.Links, nil
+}
+
+// DeleteLinks removes all outgoing graph links from the given memory.
+// Best-effort: logs warnings on failures and continues.
+func (c *MemoriesClient) DeleteLinks(id int) error {
+	links, err := c.GetLinks(id)
+	if err != nil {
+		log.Printf("storage: warning: get links for %d: %v", id, err)
+		return nil
+	}
+
+	for _, link := range links {
+		path := fmt.Sprintf("/memory/%d/link/%d", id, link.ToID)
+		resp, err := c.request(http.MethodDelete, path, nil)
+		if err != nil {
+			log.Printf("storage: warning: delete link %d->%d: %v", id, link.ToID, err)
+			continue
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("storage: warning: delete link %d->%d: API error %d", id, link.ToID, resp.StatusCode)
+		}
+	}
+	return nil
+}
+
+// SearchAdvanced queries the Memories index with full 6-signal support.
+// Only non-zero option fields are included in the request body.
+func (c *MemoriesClient) SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error) {
 	k := opts.K
 	if k == 0 {
 		k = 10
 	}
 
-	payload := struct {
-		Query        string  `json:"query"`
-		K            int     `json:"k"`
-		Threshold    float64 `json:"threshold,omitempty"`
-		Hybrid       bool    `json:"hybrid"`
-		SourcePrefix string  `json:"source_prefix,omitempty"`
-	}{
-		Query:        query,
-		K:            k,
-		Threshold:    opts.Threshold,
-		Hybrid:       opts.Hybrid,
-		SourcePrefix: opts.SourcePrefix,
+	payload := map[string]any{
+		"query": query,
+		"k":     k,
+	}
+	if opts.Threshold != 0 {
+		payload["threshold"] = opts.Threshold
+	}
+	if opts.Hybrid {
+		payload["hybrid"] = opts.Hybrid
+	}
+	if opts.SourcePrefix != "" {
+		payload["source_prefix"] = opts.SourcePrefix
+	}
+	if opts.ConfidenceWeight != 0 {
+		payload["confidence_weight"] = opts.ConfidenceWeight
+	}
+	if opts.FeedbackWeight != 0 {
+		payload["feedback_weight"] = opts.FeedbackWeight
+	}
+	if opts.GraphWeight != 0 {
+		payload["graph_weight"] = opts.GraphWeight
+	}
+	if opts.Since != "" {
+		payload["since"] = opts.Since
+	}
+	if opts.Until != "" {
+		payload["until"] = opts.Until
 	}
 
 	resp, err := c.request(http.MethodPost, "/search", payload)

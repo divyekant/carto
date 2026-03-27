@@ -66,8 +66,8 @@ func (m *errorLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Complete
 const validModuleResponse = `{
 	"module_name": "auth",
 	"wiring": [
-		{"from": "LoginHandler", "to": "UserStore", "reason": "reads user credentials"},
-		{"from": "SessionManager", "to": "TokenService", "reason": "generates JWT tokens"}
+		{"from_atom": "LoginHandler", "from_module": "auth", "to_atom": "UserStore", "to_module": "auth", "link_type": "related_to", "reason": "reads user credentials"},
+		{"from_atom": "SessionManager", "from_module": "auth", "to_atom": "TokenService", "to_module": "auth", "link_type": "related_to", "reason": "generates JWT tokens"}
 	],
 	"zones": [
 		{
@@ -118,6 +118,29 @@ func sampleModuleInput(name string) ModuleInput {
 	}
 }
 
+func TestWiringEdge_ParseFromJSON(t *testing.T) {
+	raw := `{"wiring":[{"from_atom":"TranslationManager","from_module":"nb","to_atom":"EmailDelivery","to_module":"delivery-email","link_type":"related_to","reason":"NB dispatches email"}]}`
+	var result struct {
+		Wiring []WiringEdge `json:"wiring"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Wiring) != 1 {
+		t.Fatalf("expected 1, got %d", len(result.Wiring))
+	}
+	e := result.Wiring[0]
+	if e.FromAtom != "TranslationManager" {
+		t.Errorf("FromAtom=%s", e.FromAtom)
+	}
+	if e.ToModule != "delivery-email" {
+		t.Errorf("ToModule=%s", e.ToModule)
+	}
+	if e.LinkType != "related_to" {
+		t.Errorf("LinkType=%s", e.LinkType)
+	}
+}
+
 func TestAnalyzeModule(t *testing.T) {
 	mock := &mockLLM{
 		responses: map[string]string{
@@ -141,17 +164,17 @@ func TestAnalyzeModule(t *testing.T) {
 	if len(result.Wiring) != 2 {
 		t.Fatalf("Wiring: got %d entries, want 2", len(result.Wiring))
 	}
-	if result.Wiring[0].From != "LoginHandler" {
-		t.Errorf("Wiring[0].From: got %q, want %q", result.Wiring[0].From, "LoginHandler")
+	if result.Wiring[0].FromAtom != "LoginHandler" {
+		t.Errorf("Wiring[0].FromAtom: got %q, want %q", result.Wiring[0].FromAtom, "LoginHandler")
 	}
-	if result.Wiring[0].To != "UserStore" {
-		t.Errorf("Wiring[0].To: got %q, want %q", result.Wiring[0].To, "UserStore")
+	if result.Wiring[0].ToAtom != "UserStore" {
+		t.Errorf("Wiring[0].ToAtom: got %q, want %q", result.Wiring[0].ToAtom, "UserStore")
 	}
 	if result.Wiring[0].Reason != "reads user credentials" {
 		t.Errorf("Wiring[0].Reason: got %q, want %q", result.Wiring[0].Reason, "reads user credentials")
 	}
-	if result.Wiring[1].From != "SessionManager" {
-		t.Errorf("Wiring[1].From: got %q, want %q", result.Wiring[1].From, "SessionManager")
+	if result.Wiring[1].FromAtom != "SessionManager" {
+		t.Errorf("Wiring[1].FromAtom: got %q, want %q", result.Wiring[1].FromAtom, "SessionManager")
 	}
 
 	// Verify zones.
@@ -228,13 +251,13 @@ func TestSynthesizeSystem(t *testing.T) {
 		{
 			ModuleName:   "auth",
 			ModuleIntent: "Handles authentication",
-			Wiring:       []Dependency{{From: "A", To: "B", Reason: "test"}},
+			Wiring:       []WiringEdge{{FromAtom: "A", ToAtom: "B", FromModule: "auth", ToModule: "auth", LinkType: "related_to", Reason: "test"}},
 			Zones:        []Zone{{Name: "login", Intent: "user login", Files: []string{"auth/login.go"}}},
 		},
 		{
 			ModuleName:   "api",
 			ModuleIntent: "Exposes HTTP endpoints",
-			Wiring:       []Dependency{{From: "C", To: "D", Reason: "routing"}},
+			Wiring:       []WiringEdge{{FromAtom: "C", ToAtom: "D", FromModule: "api", ToModule: "auth", LinkType: "related_to", Reason: "routing"}},
 			Zones:        []Zone{{Name: "handlers", Intent: "request handling", Files: []string{"api/handler.go"}}},
 		},
 	}

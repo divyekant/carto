@@ -44,7 +44,9 @@ Examples:
 }
 
 // importRecord is a single NDJSON line from the import stream.
+// Type is optional — lines without a type are treated as atoms for backward compatibility.
 type importRecord struct {
+	Type     string         `json:"type,omitempty"`
 	Text     string         `json:"text"`
 	Source   string         `json:"source"`
 	Metadata map[string]any `json:"metadata,omitempty"`
@@ -119,7 +121,7 @@ func runImport(cmd *cobra.Command, _ []string) error {
 		})
 
 		if len(batch) >= 100 {
-			if err := client.AddBatch(batch); err != nil {
+			if _, err := client.UpsertBatch(batch); err != nil {
 				return newConnectionError("failed to store batch: " + err.Error())
 			}
 			imported += len(batch)
@@ -133,7 +135,7 @@ func runImport(cmd *cobra.Command, _ []string) error {
 
 	// Flush remaining batch.
 	if len(batch) > 0 {
-		if err := client.AddBatch(batch); err != nil {
+		if _, err := client.UpsertBatch(batch); err != nil {
 			return newConnectionError("failed to store final batch: " + err.Error())
 		}
 		imported += len(batch)

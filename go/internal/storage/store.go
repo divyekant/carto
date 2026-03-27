@@ -51,11 +51,16 @@ const (
 type MemoriesAPI interface {
 	Health() (bool, error)
 	AddMemory(m Memory) (int, error)
-	AddBatch(memories []Memory) error
-	Search(query string, opts SearchOptions) ([]SearchResult, error)
+	UpsertBatch(memories []Memory) ([]UpsertResult, error)
+	Supersede(oldID int, newText string, newMeta map[string]any) (int, error)
+	SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error)
 	ListBySource(source string, limit, offset int) ([]SearchResult, error)
+	DeleteMemory(id int) error
 	DeleteBySource(prefix string) (int, error)
 	Count(sourcePrefix string) (int, error)
+	CreateLink(fromID, toID int, linkType string) error
+	GetLinks(id int) ([]Link, error)
+	DeleteLinks(id int) error
 }
 
 // Store provides domain-specific Memories storage for carto layers.
@@ -100,7 +105,8 @@ func (s *Store) StoreBatch(module, layer string, entries []string) error {
 			Source: tag,
 		}
 	}
-	return s.memories.AddBatch(memories)
+	_, err := s.memories.UpsertBatch(memories)
+	return err
 }
 
 // RetrieveByTier retrieves context at the requested tier level.

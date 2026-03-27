@@ -28,12 +28,17 @@ type ModuleInput struct {
 	Signals []sources.Artifact
 }
 
-// Dependency represents a cross-unit connection with intent.
-type Dependency struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Reason string `json:"reason"`
+// WiringEdge represents a cross-unit connection with graph-native fields.
+type WiringEdge struct {
+	FromAtom   string `json:"from_atom"`
+	ToAtom     string `json:"to_atom"`
+	FromModule string `json:"from_module"`
+	ToModule   string `json:"to_module"`
+	LinkType   string `json:"link_type"`
+	Reason     string `json:"reason"`
 }
+
+const maxWiringEdges = 50
 
 // Zone represents a business domain grouping.
 type Zone struct {
@@ -45,7 +50,7 @@ type Zone struct {
 // ModuleAnalysis is the output of per-module deep-tier analysis.
 type ModuleAnalysis struct {
 	ModuleName   string       `json:"module_name"`
-	Wiring       []Dependency `json:"wiring"`
+	Wiring       []WiringEdge `json:"wiring"`
 	Zones        []Zone       `json:"zones"`
 	ModuleIntent string       `json:"module_intent"`
 }
@@ -131,7 +136,7 @@ func buildModulePrompt(input ModuleInput) string {
 
 	b.WriteString(`Produce a JSON object with these fields:
 - "module_name": the module name
-- "wiring": array of {"from": "<unit>", "to": "<unit>", "reason": "<why connected>"}
+- "wiring": array of {"from_atom": "<name>", "from_module": "<module>", "to_atom": "<name>", "to_module": "<module>", "link_type": "related_to|blocked_by|caused_by", "reason": "<why>"}
 - "zones": array of {"name": "<domain>", "intent": "<purpose statement>", "files": ["<path>", ...]}
 - "module_intent": a 1-3 sentence summary of the module's purpose
 `)
@@ -168,6 +173,11 @@ func (d *DeepAnalyzer) AnalyzeModule(module ModuleInput) (*ModuleAnalysis, error
 		result.ModuleName = module.Name
 	}
 
+	// Cap wiring edges to prevent unbounded output.
+	if len(result.Wiring) > maxWiringEdges {
+		result.Wiring = result.Wiring[:maxWiringEdges]
+	}
+
 	return &result, nil
 }
 
@@ -191,7 +201,7 @@ func buildSynthesisPrompt(modules []ModuleAnalysis) string {
 		if len(m.Wiring) > 0 {
 			b.WriteString("Wiring:\n")
 			for _, w := range m.Wiring {
-				fmt.Fprintf(&b, "  - %s -> %s: %s\n", w.From, w.To, w.Reason)
+				fmt.Fprintf(&b, "  - %s -> %s: %s\n", w.FromAtom, w.ToAtom, w.Reason)
 			}
 		}
 

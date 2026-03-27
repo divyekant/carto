@@ -7,6 +7,17 @@ import (
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
+	// Clear env vars that would override defaults.
+	for _, key := range []string{
+		"MEMORIES_URL", "MEMORIES_API_KEY",
+		"ANTHROPIC_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "LLM_BASE_URL",
+		"CARTO_FAST_MODEL", "CARTO_DEEP_MODEL", "CARTO_MAX_CONCURRENT",
+		"CARTO_FAST_MAX_TOKENS", "CARTO_DEEP_MAX_TOKENS",
+		"CARTO_SERVER_TOKEN", "CARTO_CORS_ORIGINS", "CARTO_AUDIT_LOG", "CARTO_PROFILE",
+	} {
+		t.Setenv(key, "")
+	}
+
 	cfg := Load()
 	if cfg.MemoriesURL != "http://localhost:8900" {
 		t.Errorf("expected default Memories URL, got %s", cfg.MemoriesURL)

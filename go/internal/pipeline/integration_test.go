@@ -60,8 +60,8 @@ func (m *integrationLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.Co
 		return json.RawMessage(`{
 			"module_name": "",
 			"wiring": [
-				{"from": "main", "to": "pkg.Greet", "reason": "main calls Greet to produce output"},
-				{"from": "web.Logger", "to": "web.HandleRoot", "reason": "middleware wraps handler"}
+				{"from_atom": "main", "to_atom": "pkg.Greet", "from_module": "", "to_module": "", "link_type": "calls", "reason": "main calls Greet to produce output"},
+				{"from_atom": "web.Logger", "to_atom": "web.HandleRoot", "from_module": "", "to_module": "", "link_type": "wraps", "reason": "middleware wraps handler"}
 			],
 			"zones": [
 				{"name": "core", "intent": "main entry point and application bootstrap", "files": ["main.go"]},
@@ -100,18 +100,40 @@ func (f *integrationMemories) AddMemory(mem storage.Memory) (int, error) {
 	return f.nextID, nil
 }
 
-func (f *integrationMemories) AddBatch(memories []storage.Memory) error {
+func (f *integrationMemories) UpsertBatch(memories []storage.Memory) ([]storage.UpsertResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var results []storage.UpsertResult
 	for _, mem := range memories {
 		f.nextID++
 		f.memories = append(f.memories, mem)
+		results = append(results, storage.UpsertResult{ID: f.nextID, Status: "created"})
 	}
+	return results, nil
+}
+
+func (f *integrationMemories) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	return oldID + 1, nil
+}
+
+func (f *integrationMemories) SearchAdvanced(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+	return nil, nil
+}
+
+func (f *integrationMemories) DeleteMemory(id int) error {
 	return nil
 }
 
-func (f *integrationMemories) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+func (f *integrationMemories) CreateLink(fromID, toID int, linkType string) error {
+	return nil
+}
+
+func (f *integrationMemories) GetLinks(id int) ([]storage.Link, error) {
 	return nil, nil
+}
+
+func (f *integrationMemories) DeleteLinks(id int) error {
+	return nil
 }
 
 func (f *integrationMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
@@ -357,7 +379,8 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	}
 
 	layers := mem.layersStored()
-	expectedLayers := []string{"atoms", "history", "signals", "wiring", "zones", "blueprint", "patterns"}
+	// "wiring" is now stored as graph links, not a text layer.
+	expectedLayers := []string{"atoms", "history", "signals", "zones", "blueprint", "patterns"}
 	for _, layer := range expectedLayers {
 		if !layers[layer] {
 			t.Errorf("layer %q was not stored in Memories (stored layers: %v)", layer, layers)
