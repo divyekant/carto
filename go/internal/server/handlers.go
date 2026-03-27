@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -445,7 +446,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		apiKey = cfg.AnthropicKey
 	}
 
-	llmClient := llm.NewClient(llm.Options{
+	llmClient, provErr := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
@@ -453,6 +454,11 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,
 	})
+	if provErr != nil {
+		run.SendProgress("error", 0, 0)
+		log.Printf("pipeline: failed to create LLM provider %q: %v", cfg.LLMProvider, provErr)
+		return
+	}
 
 	// Build unified source registry from .carto/sources.yaml (if present)
 	// and auto-detected sources (git, GitHub, PDFs).

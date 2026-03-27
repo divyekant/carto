@@ -243,8 +243,8 @@ func newRateLimiter() *rateLimiter {
 // Default parameters: 60 requests/minute capacity, 10-request burst.
 func (rl *rateLimiter) Allow(ip string) bool {
 	const (
-		ratePerSec = 1.0  // 60 req/min = 1 req/sec
-		burst      = 10.0 // initial and max token count
+		ratePerSec = 5.0  // 300 req/min = 5 req/sec
+		burst      = 30.0 // initial and max token count
 	)
 
 	rl.mu.Lock()
