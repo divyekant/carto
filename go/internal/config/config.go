@@ -11,7 +11,7 @@ import (
 
 // Version is the semantic version embedded by the build pipeline.
 // It is used in audit log entries and the /api/health response.
-var Version = "1.1.0"
+var Version = "2.0.0"
 
 type Config struct {
 	MemoriesURL   string
