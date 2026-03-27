@@ -78,8 +78,8 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		incremental = false
 	}
 
-	// Create LLM client.
-	llmClient := llm.NewClient(llm.Options{
+	// Create LLM client using the configured provider.
+	llmClient, llmErr := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
@@ -87,6 +87,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,
 	})
+	if llmErr != nil {
+		return fmt.Errorf("create LLM provider %q: %w", cfg.LLMProvider, llmErr)
+	}
 
 	// Create Memories client.
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)

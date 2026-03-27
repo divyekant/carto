@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,8 +107,8 @@ func runWriteback(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create LLM client.
-	llmClient := llm.NewClient(llm.Options{
+	// Create LLM client using the configured provider.
+	llmClient, llmErr := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
@@ -115,6 +116,9 @@ func runWriteback(cmd *cobra.Command, args []string) error {
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,
 	})
+	if llmErr != nil {
+		return fmt.Errorf("create LLM provider %q: %w", cfg.LLMProvider, llmErr)
+	}
 
 	// Create Memories client.
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
@@ -274,7 +278,9 @@ func writebackFile(
 	cmd *cobra.Command,
 	projectRoot, relPath, projectName string,
 	modules []scanner.Module,
-	llmClient *llm.Client,
+	llmClient interface {
+		CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteOptions) (json.RawMessage, error)
+	},
 	memoriesClient *storage.MemoriesClient,
 	mf *manifest.Manifest,
 ) (writebackStats, []string, error) {
