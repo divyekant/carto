@@ -408,6 +408,7 @@ func writebackFile(
 			mem := storage.Memory{
 				Text:     text,
 				Source:   source,
+				Key:      fmt.Sprintf("%s:%s:%s:%s", source, relPath, atom.Name, atom.Kind),
 				Metadata: meta,
 			}
 			_, err := memoriesClient.UpsertBatch([]storage.Memory{mem})

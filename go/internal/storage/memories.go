@@ -16,6 +16,7 @@ import (
 type Memory struct {
 	Text       string         `json:"text"`
 	Source     string         `json:"source"`
+	Key        string         `json:"key,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	DocumentAt string         `json:"document_at,omitempty"`
 }

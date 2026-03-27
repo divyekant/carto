@@ -295,9 +295,11 @@ func Run(cfg Config) (*Result, error) {
 					if info, statErr := os.Stat(a.FilePath); statErr == nil {
 						docAt = info.ModTime().Format(time.RFC3339)
 					}
+					source := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name)
 					memories[j] = storage.Memory{
 						Text:       a.Summary + "\n\n" + a.ClarifiedCode,
-						Source:     fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name),
+						Source:     source,
+						Key:        fmt.Sprintf("%s:%s:%s:%s", source, a.FilePath, a.Name, a.Kind),
 						DocumentAt: docAt,
 						Metadata: map[string]any{
 							"name":     a.Name,
