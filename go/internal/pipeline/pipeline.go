@@ -223,7 +223,7 @@ func Run(cfg Config) (*Result, error) {
 				return result, fmt.Errorf("pipeline: list existing atoms for %s: %w", mod.Name, listErr)
 			}
 			if len(existing) > 0 {
-				filtered := files[:0]
+				filtered := make([]string, 0, len(files))
 				for _, relPath := range files {
 					if !existing[filepath.ToSlash(relPath)] {
 						filtered = append(filtered, relPath)
@@ -354,16 +354,22 @@ func Run(cfg Config) (*Result, error) {
 					if info, statErr := os.Stat(a.FilePath); statErr == nil {
 						docAt = info.ModTime().Format(time.RFC3339)
 					}
+					// Store relative path in metadata for portability and
+					// consistent matching with writeback/repair.
+					relFP := a.FilePath
+					if rel, err := filepath.Rel(scanResult.Root, a.FilePath); err == nil {
+						relFP = filepath.ToSlash(rel)
+					}
 					source := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name)
 					memories[j] = storage.Memory{
 						Text:       a.Summary + "\n\n" + a.ClarifiedCode,
 						Source:     source,
-						Key:        fmt.Sprintf("%s:%s:%s:%s", source, a.FilePath, a.Name, a.Kind),
+						Key:        fmt.Sprintf("%s:%s:%s:%s", source, relFP, a.Name, a.Kind),
 						DocumentAt: docAt,
 						Metadata: map[string]any{
 							"name":     a.Name,
 							"kind":     a.Kind,
-							"filepath": a.FilePath,
+							"filepath": relFP,
 							"module":   mw.module.Name,
 							"language": a.Language,
 						},
@@ -377,7 +383,11 @@ func Run(cfg Config) (*Result, error) {
 				} else {
 					atomsMu.Lock()
 					for j, r := range results {
-						key := atomKey(mw.module.Name, analyzed[j].FilePath, analyzed[j].Name, analyzed[j].Kind)
+						relAtomPath := analyzed[j].FilePath
+						if rel, err := filepath.Rel(scanResult.Root, analyzed[j].FilePath); err == nil {
+							relAtomPath = filepath.ToSlash(rel)
+						}
+						key := atomKey(mw.module.Name, relAtomPath, analyzed[j].Name, analyzed[j].Kind)
 						atomIDs[key] = r.ID
 					}
 					atomsMu.Unlock()

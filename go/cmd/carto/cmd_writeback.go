@@ -354,11 +354,21 @@ func writebackFile(
 	// Build source prefix scoped to this module's atoms layer.
 	sourcePrefix := fmt.Sprintf("carto/%s/%s/layer:atoms", projectName, moduleName)
 
-	// Fetch existing atoms for this file from Memories.
-	existingAtoms, err := memoriesClient.ListBySource(sourcePrefix, 500, 0)
-	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("list existing atoms: %v (treating as empty)", err))
-		existingAtoms = nil
+	// Fetch existing atoms for this module from Memories (paginated).
+	var existingAtoms []storage.SearchResult
+	const pageSize = 500
+	for offset := 0; ; {
+		page, listErr := memoriesClient.ListBySource(sourcePrefix, pageSize, offset)
+		if listErr != nil {
+			warnings = append(warnings, fmt.Sprintf("list existing atoms: %v (treating as empty)", listErr))
+			existingAtoms = nil
+			break
+		}
+		existingAtoms = append(existingAtoms, page...)
+		if len(page) < pageSize {
+			break
+		}
+		offset += len(page)
 	}
 
 	// Filter to atoms belonging to this file path.

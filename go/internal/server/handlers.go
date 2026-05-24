@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -488,10 +487,6 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	if req.RepairMissingAtoms {
 		req.Incremental = false
 	}
-	if req.MaxFiles > 0 && !req.RepairMissingAtoms {
-		run.SendError("max_files requires repair_missing_atoms")
-		return
-	}
 
 	apiKey := cfg.LLMApiKey
 	if apiKey == "" {
@@ -507,8 +502,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		BaseURL:       cfg.LLMBaseURL,
 	})
 	if provErr != nil {
-		run.SendProgress("error", 0, 0)
-		log.Printf("pipeline: failed to create LLM provider %q: %v", cfg.LLMProvider, provErr)
+		run.SendError(fmt.Sprintf("failed to create LLM provider %q: %v", cfg.LLMProvider, provErr))
 		return
 	}
 
