@@ -2,28 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.0.0] - 2026-03-26
+## [2.0.0] - 2026-05-23
 
 ### Breaking Changes
+- Default LLM provider changed from `anthropic` to `codex` — users without a Codex session should set `LLM_PROVIDER=anthropic`
 - Manifest format bumped to v2.0 — existing indexes require full re-index with `carto index`
 - Export/import NDJSON format includes `type` field — v1 exports incompatible
 - Wiring stored as graph links instead of JSON blobs
 
 ### Added
+- **Codex LLM provider** — uses the local Codex ChatGPT session (`~/.codex/auth.json`) with OAuth token refresh, SSE streaming, and retry logic; no separate API key required
+- **Index dry-run** — `carto index --dry-run` scans and reports module/file scale without LLM calls or Memories writes
+- **Repair mode** — `--repair-missing-atoms` processes only files lacking atom memories, `--atoms-only` stops after atom storage, `--max-files` caps repair batches
+- **Index plan API** — `POST /api/projects/plan` returns the same dry-run plan as the CLI
 - `carto writeback` command for file-level index updates without full re-index
 - Structured atom metadata (name, kind, filepath, module, language) stored in Memories
 - Graph-native wiring via Memories v5 links (related_to, blocked_by, caused_by)
 - 6-signal search: graph weight, confidence, feedback, recency, vector, BM25
 - `--graph-weight`, `--confidence-weight`, `--feedback-weight`, `--since`, `--until` flags on `carto query`
 - `document_at` temporal field on atoms from file modification time
-- Web UI advanced search filters with graph/confidence result badges
+- Web UI advanced search filters, graph/confidence result badges, repair/dry-run options
 - `carto status` shows atom count from Memories with offline fallback
+- `carto auth status` and `carto doctor` show Codex session status
+- Path-based module filter disambiguation for repos with duplicate module names
+- Retry with exponential backoff on `UpsertBatch` and `DeleteBySource` for Memories resilience
+- `CompleteJSON` now extracts JSON arrays in addition to objects
 
 ### Changed
+- Default LLM provider is now `codex` (was `anthropic`); default models are `gpt-5.4-mini` / `gpt-5.5`
 - Atoms stored via `UpsertBatch` with metadata instead of text blob `AddBatch`
 - Incremental re-indexing uses targeted `DeleteBySource` instead of full module clear
 - Generated CLAUDE.md instructions use `carto writeback` instead of `memory_add`
 - Server query handler uses Memories server-side source filtering (removed 3x over-fetch)
+- `carto init` skips API key prompt when provider is `codex` or `ollama`
+- Unassigned files grouped into synthetic modules by top-level directory
 
 ### Removed
 - `formatAtomEntry` function (atoms no longer stored as formatted text blobs)

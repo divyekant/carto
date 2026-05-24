@@ -296,8 +296,8 @@ specific purpose in the context hierarchy:
 - **Content**: Cross-component dependency graph with intent annotations
 - **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via deep-tier LLM
 - **LLM cost**: One deep-tier call per module (low volume, high cost)
-- **Schema**: `analyzer.Dependency` -- `From` (source unit), `To` (target
-  unit), `Reason` (why they are connected)
+- **Schema**: `analyzer.WiringEdge` -- `From` (source unit), `To` (target
+  unit), `Kind` (relationship type), `Reason` (why they are connected)
 - **Memories tag**: `carto/{project}/{module}/layer:wiring`
 - **Purpose**: Architectural connectivity; answers "what depends on what
   and why"
@@ -335,7 +335,7 @@ Carto uses two model tiers to balance cost, speed, and analytical depth:
 
 ### Fast Tier (High-Volume, Low-Cost)
 
-- **Default model**: `claude-haiku-4-5-20251001`
+- **Default model**: `gpt-5.4-mini` (codex provider) / `claude-haiku-4-5-20251001` (anthropic)
 - **Configurable via**: `CARTO_FAST_MODEL` environment variable
 - **Used for**: Atom analysis (Layer 1a)
 - **Call pattern**: One call per code chunk -- high volume
@@ -345,7 +345,7 @@ Carto uses two model tiers to balance cost, speed, and analytical depth:
 
 ### Deep Tier (Low-Volume, High-Cost)
 
-- **Default model**: `claude-opus-4-6`
+- **Default model**: `gpt-5.5` (codex provider) / `claude-opus-4-6` (anthropic)
 - **Configurable via**: `CARTO_DEEP_MODEL` environment variable
 - **Used for**: Per-module deep analysis (Layer 2+3) and system synthesis
   (Layer 4)
@@ -382,12 +382,13 @@ go func() {
 The LLM client's `CompleteJSON()` method extracts JSON from model responses
 by:
 1. Stripping markdown code fences (` ```json ... ``` `)
-2. Finding the first `{` character
-3. Walking forward to find the matching `}` while tracking brace depth
-   and string escaping
+2. Finding the first `{` or `[` character (whichever appears first)
+3. Walking forward to find the matching closing delimiter while tracking
+   depth and string escaping
 4. Validating the extracted JSON with `json.Valid()`
 
-This makes the system resilient to models wrapping JSON in prose or markdown.
+This makes the system resilient to models wrapping JSON in prose or markdown,
+and supports both object and array responses.
 
 ---
 
@@ -440,7 +441,7 @@ The manifest is stored at `{projectRoot}/.carto/manifest.json` and tracks:
 
 ```go
 type Manifest struct {
-    Version   string                   // "1.0"
+    Version   string                   // "2.0"
     Project   string                   // project name
     IndexedAt time.Time                // last indexing timestamp
     Files     map[string]FileEntry     // keyed by relative path
@@ -592,16 +593,22 @@ as a library. This:
 - Allows the Memories index to be shared across tools (CLI, IDE plugins, etc.)
 - Avoids embedding a large C++ dependency
 - Enables scaling the storage layer independently
-- Uses a REST interface: `/memory/add`, `/memory/add-batch`, `/search`,
-  `/memories`, `/memories/count`, `/memory/delete-by-prefix`, `/memory/{id}`
-  (DELETE)
+- Uses a REST interface: `/memory/add`, `/memory/upsert-batch`, `/search`,
+  `/search/advanced`, `/memories`, `/memories/count`,
+  `/memory/delete-by-prefix`, `/memory/{id}` (DELETE), `/memory/link`
 - Search supports `source_prefix` filtering for project-scoped queries
+- Advanced search supports 6-signal ranking (graph, confidence, feedback,
+  temporal, vector, BM25)
+- Bulk upsert via `POST /memory/upsert-batch` with metadata and dedup keys
 - Bulk delete via `POST /memory/delete-by-prefix` with `{source_prefix}`
+- Graph links via `POST /memory/link` (create), `GET /memory/links/{id}`
+  (read), `DELETE /memory/links/{id}` (remove)
 - Count via `GET /memories/count?source=<prefix>`
 - List supports `offset` parameter for pagination (up to 5000 limit)
 
-Batch writes are chunked into groups of 500 (server handles internal chunking
-by 100).
+Batch writes are chunked into groups of 500. Both `UpsertBatch` and
+`DeleteBySource` retry with exponential backoff on transient failures
+(429, 5xx, timeouts).
 
 ### Manifest-Based Incremental Indexing
 
@@ -731,11 +738,12 @@ This enables:
 cmd/carto/main.go
   |
   +-- internal/config         (environment variable loading)
-  +-- internal/llm            (Anthropic API client)
+  +-- internal/llm            (multi-provider LLM client: Codex, Anthropic, OpenAI, Ollama)
   +-- internal/scanner        (file tree walking, module detection)
   +-- internal/manifest       (SHA-256 tracking, change detection)
   +-- internal/signals        (signal plugin registry)
   +-- internal/storage        (Memories client + Store abstraction)
+  +-- internal/indexplan      (dry-run scan planning)
   +-- internal/pipeline       (orchestrator)
   |     |
   |     +-- internal/scanner
