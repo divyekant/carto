@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"context"
 
@@ -35,20 +36,31 @@ type LLMClient interface {
 
 // Config holds all the dependencies the pipeline needs.
 type Config struct {
-	Ctx            context.Context // optional: cancel to stop the pipeline mid-run
-	ProjectName    string
-	RootPath       string
-	LLMClient      LLMClient
-	MemoriesClient storage.MemoriesAPI
-	SourceRegistry *sources.Registry // unified source registry (replaces SignalRegistry + KnowledgeRegistry)
-	MaxWorkers     int
-	ProgressFn     func(phase string, done, total int) // optional progress callback
-	LogFn          func(level, msg string)              // optional log callback
-	Incremental    bool                                 // use manifest for incremental indexing
-	ModuleFilter   string                               // optional: index only this module
-	FastMaxTokens  int                                  // optional: override fast-tier max tokens (default 4096)
-	DeepMaxTokens  int                                  // optional: override deep-tier max tokens (default 8192)
-	SkipSkillFiles bool                                 // if true, skip generating CLAUDE.md and .cursorrules
+	Ctx                context.Context // optional: cancel to stop the pipeline mid-run
+	ProjectName        string
+	RootPath           string
+	LLMClient          LLMClient
+	MemoriesClient     storage.MemoriesAPI
+	SourceRegistry     *sources.Registry // unified source registry (replaces SignalRegistry + KnowledgeRegistry)
+	MaxWorkers         int
+	ProgressFn         func(phase string, done, total int) // optional progress callback
+	LogFn              func(level, msg string)             // optional log callback
+	Incremental        bool                                // use manifest for incremental indexing
+	ModuleFilter       string                              // optional: index only this module
+	FastMaxTokens      int                                 // optional: override fast-tier max tokens (default 4096)
+	DeepMaxTokens      int                                 // optional: override deep-tier max tokens (default 8192)
+	SkipSkillFiles     bool                                // if true, skip generating CLAUDE.md and .cursorrules
+	RepairMissingAtoms bool                                // use Memories atom metadata to process only missing files
+	AtomsOnly          bool                                // stop after atom extraction/storage
+	MaxFiles           int                                 // optional: cap files processed in a repair batch
+}
+
+// AtomIDMap maps "module:filepath:name:kind" to the Memories ID assigned during upsert.
+type AtomIDMap map[string]int
+
+// atomKey builds the lookup key for an atom ID.
+func atomKey(module, filepath, name, kind string) string {
+	return module + ":" + filepath + ":" + name + ":" + kind
 }
 
 // Result holds the output of a full pipeline run.
@@ -56,10 +68,16 @@ type Result struct {
 	Modules        int
 	FilesIndexed   int
 	AtomsCreated   int
+	AtomIDs        AtomIDMap
 	ModuleAnalyses []analyzer.ModuleAnalysis
 	Synthesis      *analyzer.SystemSynthesis
 	Errors         []error
 }
+
+const (
+	largeModuleFileThreshold = 250
+	largeFileExcerptChars    = 500
+)
 
 // Run executes the full indexing pipeline across five phases:
 //  1. Scan — discover files and modules
@@ -76,6 +94,12 @@ func Run(cfg Config) (*Result, error) {
 	if cfg.MaxWorkers <= 0 {
 		cfg.MaxWorkers = 4
 	}
+	if cfg.MaxFiles < 0 {
+		return nil, fmt.Errorf("pipeline: max files must be non-negative")
+	}
+	if cfg.MaxFiles > 0 && !cfg.RepairMissingAtoms {
+		return nil, fmt.Errorf("pipeline: max files is only supported with repair missing atoms")
+	}
 
 	// Pre-flight: verify Memories server is reachable.
 	if healthy, err := cfg.MemoriesClient.Health(); err != nil || !healthy {
@@ -83,6 +107,7 @@ func Run(cfg Config) (*Result, error) {
 	}
 
 	result := &Result{}
+	atomIDs := AtomIDMap{}
 	progress := cfg.ProgressFn
 	if progress == nil {
 		progress = func(string, int, int) {}
@@ -116,20 +141,21 @@ func Run(cfg Config) (*Result, error) {
 	// Apply module filter.
 	modules := scanResult.Modules
 	if cfg.ModuleFilter != "" {
-		modules = filterModules(modules, cfg.ModuleFilter)
+		var filterErr error
+		modules, filterErr = scanner.ResolveModuleFilter(modules, cfg.ModuleFilter)
+		if filterErr != nil {
+			return nil, fmt.Errorf("pipeline: %w", filterErr)
+		}
 	}
 
 	result.Modules = len(modules)
-	if cfg.ModuleFilter != "" && len(modules) == 0 {
-		available := make([]string, len(scanResult.Modules))
-		for i, m := range scanResult.Modules {
-			available[i] = m.Name
-		}
-		return nil, fmt.Errorf("pipeline: module %q not found. available: %v", cfg.ModuleFilter, available)
-	}
 	if len(modules) == 0 {
 		logFn("info", "No modules found, nothing to index")
 		return result, nil
+	}
+	fileInfoByRel := make(map[string]scanner.FileInfo, len(scanResult.Files))
+	for _, f := range scanResult.Files {
+		fileInfoByRel[f.RelPath] = f
 	}
 	logFn("info", fmt.Sprintf("Found %d module(s) with %d total files", len(modules), countModuleFiles(modules)))
 
@@ -153,6 +179,7 @@ func Run(cfg Config) (*Result, error) {
 
 	var work []moduleWork
 	totalFiles := 0
+	remainingFiles := cfg.MaxFiles
 
 	for _, mod := range modules {
 		files := mod.Files
@@ -166,11 +193,22 @@ func Run(cfg Config) (*Result, error) {
 				files = append(changed.Added, changed.Modified...)
 
 				// Clean removed files from Memories.
+				// Delete only atoms belonging to the removed files, not the
+				// entire module's atoms layer. This preserves atoms for
+				// unchanged files.
 				if len(changed.Removed) > 0 {
-					store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
-					if clearErr := store.ClearModule(mod.Name); clearErr != nil {
-						log.Printf("pipeline: warning: failed to clear module %s: %v", mod.Name, clearErr)
-						result.Errors = append(result.Errors, clearErr)
+					atomsPrefix := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mod.Name)
+					existing, listErr := cfg.MemoriesClient.ListBySource(atomsPrefix, 500, 0)
+					if listErr == nil {
+						removedSet := make(map[string]bool)
+						for _, rp := range changed.Removed {
+							removedSet[rp] = true
+						}
+						for _, mem := range existing {
+							if fp, ok := mem.Metadata["filepath"].(string); ok && removedSet[fp] {
+								cfg.MemoriesClient.DeleteMemory(mem.ID)
+							}
+						}
 					}
 					// Remove from manifest.
 					for _, rp := range changed.Removed {
@@ -178,6 +216,31 @@ func Run(cfg Config) (*Result, error) {
 					}
 				}
 			}
+		}
+		if cfg.RepairMissingAtoms {
+			existing, listErr := existingAtomRelPaths(cfg.MemoriesClient, cfg.ProjectName, mod.Name, mod.RelPath, scanResult.Root)
+			if listErr != nil {
+				return result, fmt.Errorf("pipeline: list existing atoms for %s: %w", mod.Name, listErr)
+			}
+			if len(existing) > 0 {
+				filtered := files[:0]
+				for _, relPath := range files {
+					if !existing[filepath.ToSlash(relPath)] {
+						filtered = append(filtered, relPath)
+					}
+				}
+				logFn("info", fmt.Sprintf("Repair missing atoms for %s: skipping %d existing file(s), indexing %d missing file(s)", mod.Name, len(files)-len(filtered), len(filtered)))
+				files = filtered
+			}
+		}
+		if cfg.MaxFiles > 0 {
+			if remainingFiles <= 0 {
+				files = nil
+			} else if len(files) > remainingFiles {
+				logFn("info", fmt.Sprintf("Limiting repair batch for %s to %d file(s); %d file(s) remain for later batches", mod.Name, remainingFiles, len(files)-remainingFiles))
+				files = files[:remainingFiles]
+			}
+			remainingFiles -= len(files)
 		}
 
 		if len(files) == 0 {
@@ -194,12 +257,22 @@ func Run(cfg Config) (*Result, error) {
 		return result, context.Canceled
 	}
 
+	store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
+	if !cfg.Incremental && !cfg.RepairMissingAtoms {
+		for _, w := range work {
+			if err := store.ClearModule(w.module.Name); err != nil {
+				return result, fmt.Errorf("pipeline: clear module %s before re-storing: %w", w.module.Name, err)
+			}
+		}
+	}
+
 	// ── Phase 2: Chunk + Atoms (parallel per module) ───────────────────
 	logFn("info", fmt.Sprintf("Chunking and analyzing %d files across %d module(s)...", totalFiles, len(work)))
 
 	type moduleAtoms struct {
-		module scanner.Module
-		atoms  []*atoms.Atom
+		module       scanner.Module
+		atoms        []*atoms.Atom
+		atomComplete bool
 	}
 
 	atomAnalyzer := atoms.NewAnalyzer(cfg.LLMClient, cfg.FastMaxTokens)
@@ -238,7 +311,13 @@ func Run(cfg Config) (*Result, error) {
 				return
 			}
 
-			allChunks, chunkErrs := chunkModuleFiles(mw.module, mw.filesToIndex, scanResult.Root)
+			var allChunks []chunker.Chunk
+			var chunkErrs []error
+			if len(mw.filesToIndex) > largeModuleFileThreshold {
+				allChunks, chunkErrs = fileLevelChunks(mw.filesToIndex, scanResult.Root, fileInfoByRel)
+			} else {
+				allChunks, chunkErrs = chunkModuleFiles(mw.module, mw.filesToIndex, scanResult.Root)
+			}
 
 			if cancelled() {
 				return
@@ -258,15 +337,63 @@ func Run(cfg Config) (*Result, error) {
 				}
 			}
 
+			moduleErrs := append([]error(nil), chunkErrs...)
+
 			// Analyze atoms.
 			analyzed, analyzeErr := atomAnalyzer.AnalyzeBatchCtx(ctx, atomChunks, cfg.MaxWorkers, nil)
 
-			atomsMu.Lock()
-			moduleAtomsList[idx] = moduleAtoms{module: mw.module, atoms: analyzed}
-			if analyzeErr != nil {
-				atomErrors = append(atomErrors, analyzeErr)
+			// Set module on each atom and store with metadata via UpsertBatch.
+			if len(analyzed) > 0 {
+				for _, a := range analyzed {
+					a.Module = mw.module.Name
+				}
+				memories := make([]storage.Memory, len(analyzed))
+				for j, a := range analyzed {
+					var docAt string
+					// a.FilePath is the absolute path set by the chunker.
+					if info, statErr := os.Stat(a.FilePath); statErr == nil {
+						docAt = info.ModTime().Format(time.RFC3339)
+					}
+					source := fmt.Sprintf("carto/%s/%s/layer:atoms", cfg.ProjectName, mw.module.Name)
+					memories[j] = storage.Memory{
+						Text:       a.Summary + "\n\n" + a.ClarifiedCode,
+						Source:     source,
+						Key:        fmt.Sprintf("%s:%s:%s:%s", source, a.FilePath, a.Name, a.Kind),
+						DocumentAt: docAt,
+						Metadata: map[string]any{
+							"name":     a.Name,
+							"kind":     a.Kind,
+							"filepath": a.FilePath,
+							"module":   mw.module.Name,
+							"language": a.Language,
+						},
+					}
+				}
+				results, upsertErr := cfg.MemoriesClient.UpsertBatch(memories)
+				if upsertErr != nil {
+					moduleErrs = append(moduleErrs, fmt.Errorf("upsert atoms for %s: %w", mw.module.Name, upsertErr))
+				} else if len(results) != len(analyzed) {
+					moduleErrs = append(moduleErrs, fmt.Errorf("upsert atoms for %s: got %d results for %d atoms", mw.module.Name, len(results), len(analyzed)))
+				} else {
+					atomsMu.Lock()
+					for j, r := range results {
+						key := atomKey(mw.module.Name, analyzed[j].FilePath, analyzed[j].Name, analyzed[j].Kind)
+						atomIDs[key] = r.ID
+					}
+					atomsMu.Unlock()
+				}
 			}
-			atomErrors = append(atomErrors, chunkErrs...)
+
+			atomsMu.Lock()
+			if analyzeErr != nil {
+				moduleErrs = append(moduleErrs, analyzeErr)
+			}
+			moduleAtomsList[idx] = moduleAtoms{
+				module:       mw.module,
+				atoms:        analyzed,
+				atomComplete: len(moduleErrs) == 0,
+			}
+			atomErrors = append(atomErrors, moduleErrs...)
 			atomsDone++
 			d := atomsDone
 			atomsMu.Unlock()
@@ -280,6 +407,24 @@ func Run(cfg Config) (*Result, error) {
 	// Count total atoms.
 	for _, ma := range moduleAtomsList {
 		result.AtomsCreated += len(ma.atoms)
+	}
+
+	if cfg.AtomsOnly {
+		if mf != nil {
+			for i, w := range work {
+				if !moduleAtomsList[i].atomComplete {
+					logFn("warn", fmt.Sprintf("Skipping manifest update for %s because atom indexing did not complete", w.module.Name))
+					continue
+				}
+				updateManifestForFiles(mf, scanResult.Root, w.filesToIndex, result)
+			}
+			mf.Project = cfg.ProjectName
+			if err := mf.Save(); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("save manifest: %w", err))
+			}
+		}
+		result.AtomIDs = atomIDs
+		return result, nil
 	}
 
 	if cancelled() {
@@ -416,8 +561,9 @@ func Run(cfg Config) (*Result, error) {
 	}
 	result.ModuleAnalyses = moduleAnalyses
 
-	// System synthesis.
-	if len(moduleAnalyses) > 0 {
+	// System synthesis only represents a complete project run. Module-filtered
+	// retries refresh module layers without replacing the project blueprint.
+	if len(moduleAnalyses) > 0 && cfg.ModuleFilter == "" {
 		progress("synthesis", 0, 1)
 		synthesis, synthErr := deepAnalyzer.SynthesizeSystem(moduleAnalyses)
 		if synthErr != nil {
@@ -434,10 +580,13 @@ func Run(cfg Config) (*Result, error) {
 
 	// ── Phase 5: Store ─────────────────────────────────────────────────
 	logFn("info", "Storing results in Memories...")
-	store := storage.NewStore(cfg.MemoriesClient, cfg.ProjectName)
 	storeDone := 0
-	// Total store ops: per-module layers (5 each) + system-wide (2).
-	storeTotal := len(work)*5 + 2
+	// Total store ops: per-module layers (4 each: history, signals, wiring, zones)
+	// + system-wide (2: blueprint, patterns). Atoms are stored in Phase 2.
+	storeTotal := len(work) * 4
+	if result.Synthesis != nil {
+		storeTotal += 2
+	}
 
 	for i, w := range work {
 		if cancelled() {
@@ -446,28 +595,7 @@ func Run(cfg Config) (*Result, error) {
 
 		modName := w.module.Name
 
-		// For non-incremental runs, clear existing module data before storing
-		// to prevent duplicate entries accumulating in Memories.
-		if !cfg.Incremental {
-			if err := store.ClearModule(modName); err != nil {
-				log.Printf("pipeline: warning: failed to clear module %s before re-storing: %v", modName, err)
-			}
-		}
-
-		// Store atoms individually for better searchability and to avoid
-		// truncation when the total atoms JSON exceeds the 49K content limit.
-		atomEntries := make([]string, len(moduleAtomsList[i].atoms))
-		for j, a := range moduleAtomsList[i].atoms {
-			atomEntries[j] = formatAtomEntry(a)
-		}
-		if len(atomEntries) > 0 {
-			if err := store.StoreBatch(modName, "atoms", atomEntries); err != nil {
-				log.Printf("pipeline: warning: failed to store atoms for %s: %v", modName, err)
-				result.Errors = append(result.Errors, err)
-			}
-		}
-		storeDone++
-		progress("store", storeDone, storeTotal)
+		// Atoms are stored in Phase 2 via UpsertBatch with metadata.
 
 		// Store history.
 		if histJSON, err := json.Marshal(moduleContexts[i].history); err == nil {
@@ -489,17 +617,9 @@ func Run(cfg Config) (*Result, error) {
 		storeDone++
 		progress("store", storeDone, storeTotal)
 
-		// Store wiring and zones from module analysis (if available).
+		// Store zones from module analysis (if available).
+		// Wiring is now represented as graph links (created below).
 		if ma := findModuleAnalysis(moduleAnalyses, modName); ma != nil {
-			if wiringJSON, err := json.Marshal(ma.Wiring); err == nil {
-				if err := store.StoreLayer(modName, "wiring", string(wiringJSON)); err != nil {
-					log.Printf("pipeline: warning: failed to store wiring for %s: %v", modName, err)
-					result.Errors = append(result.Errors, err)
-				}
-			}
-			storeDone++
-			progress("store", storeDone, storeTotal)
-
 			if zonesJSON, err := json.Marshal(ma.Zones); err == nil {
 				if err := store.StoreLayer(modName, "zones", string(zonesJSON)); err != nil {
 					log.Printf("pipeline: warning: failed to store zones for %s: %v", modName, err)
@@ -509,25 +629,33 @@ func Run(cfg Config) (*Result, error) {
 			storeDone++
 			progress("store", storeDone, storeTotal)
 		} else {
-			storeDone += 2
+			storeDone++
 			progress("store", storeDone, storeTotal)
 		}
 
-		// Update manifest for each file in this module.
+		// Update manifest for each file in this module only after atom storage
+		// completed. Otherwise incremental runs can hide missing atom data.
 		if mf != nil {
-			for _, relPath := range w.filesToIndex {
-				absPath := filepath.Join(scanResult.Root, relPath)
-				hash, hashErr := mf.ComputeHash(absPath)
-				if hashErr != nil {
-					log.Printf("pipeline: warning: hash failed for %s: %v", relPath, hashErr)
-					result.Errors = append(result.Errors, fmt.Errorf("hash failed for %s: %w", relPath, hashErr))
-					continue
-				}
-				info, statErr := os.Stat(absPath)
-				if statErr != nil {
-					continue
-				}
-				mf.UpdateFile(relPath, hash, info.Size())
+			if !moduleAtomsList[i].atomComplete {
+				logFn("warn", fmt.Sprintf("Skipping manifest update for %s because atom indexing did not complete", modName))
+			} else {
+				updateManifestForFiles(mf, scanResult.Root, w.filesToIndex, result)
+			}
+		}
+	}
+
+	// Create graph links from wiring edges.
+	for _, ma := range result.ModuleAnalyses {
+		for _, edge := range ma.Wiring {
+			fromID := findAtomID(atomIDs, edge.FromModule, edge.FromAtom)
+			toID := findAtomID(atomIDs, edge.ToModule, edge.ToAtom)
+			if fromID == 0 || toID == 0 {
+				logFn("warn", fmt.Sprintf("skip link: %s/%s -> %s/%s (atom not found)",
+					edge.FromModule, edge.FromAtom, edge.ToModule, edge.ToAtom))
+				continue
+			}
+			if err := cfg.MemoriesClient.CreateLink(fromID, toID, edge.LinkType); err != nil {
+				logFn("warn", fmt.Sprintf("create link %d->%d: %v", fromID, toID, err))
 			}
 		}
 	}
@@ -548,9 +676,6 @@ func Run(cfg Config) (*Result, error) {
 			}
 		}
 		storeDone++
-		progress("store", storeDone, storeTotal)
-	} else {
-		storeDone += 2
 		progress("store", storeDone, storeTotal)
 	}
 
@@ -593,17 +718,20 @@ func Run(cfg Config) (*Result, error) {
 		progress("skillfiles", 1, 1)
 	}
 
+	result.AtomIDs = atomIDs
 	return result, nil
 }
 
-// filterModules returns only the module matching the given name.
-func filterModules(modules []scanner.Module, name string) []scanner.Module {
-	for _, m := range modules {
-		if m.Name == name {
-			return []scanner.Module{m}
+// findAtomID searches the AtomIDMap for an atom by module and name.
+// It returns 0 if no match is found.
+func findAtomID(ids AtomIDMap, module, name string) int {
+	for key, id := range ids {
+		parts := strings.SplitN(key, ":", 4)
+		if len(parts) >= 3 && parts[0] == module && parts[2] == name {
+			return id
 		}
 	}
-	return nil
+	return 0
 }
 
 // chunkModuleFiles reads and chunks all files for a module.
@@ -635,6 +763,114 @@ func chunkModuleFiles(mod scanner.Module, filesToIndex []string, scanRoot string
 	}
 
 	return allChunks, errs
+}
+
+func fileLevelChunks(filesToIndex []string, scanRoot string, fileInfoByRel map[string]scanner.FileInfo) ([]chunker.Chunk, []error) {
+	chunks := make([]chunker.Chunk, 0, len(filesToIndex))
+	var errs []error
+	for _, relPath := range filesToIndex {
+		info, ok := fileInfoByRel[relPath]
+		absPath := filepath.Join(scanRoot, relPath)
+		language := scanner.DetectLanguage(filepath.Base(relPath))
+		if ok {
+			absPath = info.Path
+			language = info.Language
+		}
+
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			log.Printf("pipeline: warning: cannot read %s: %v", relPath, err)
+			errs = append(errs, err)
+			continue
+		}
+
+		excerpt := string(data)
+		if len(excerpt) > largeFileExcerptChars {
+			excerpt = excerpt[:largeFileExcerptChars]
+		}
+		chunks = append(chunks, chunker.Chunk{
+			Name:      relPath,
+			Kind:      "file",
+			Language:  language,
+			FilePath:  absPath,
+			StartLine: 1,
+			EndLine:   strings.Count(excerpt, "\n") + 1,
+			Code:      excerpt,
+		})
+	}
+	return chunks, errs
+}
+
+func existingAtomRelPaths(memories storage.MemoriesAPI, projectName, moduleName, moduleRelPath, scanRoot string) (map[string]bool, error) {
+	source := fmt.Sprintf("carto/%s/%s/layer:atoms", projectName, moduleName)
+	const pageSize = 1000
+	seen := map[string]bool{}
+	for offset := 0; ; {
+		results, err := memories.ListBySource(source, pageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range results {
+			if rel := atomResultRelPath(result, scanRoot, moduleRelPath); rel != "" {
+				seen[rel] = true
+			}
+		}
+		if len(results) < pageSize {
+			break
+		}
+		offset += len(results)
+	}
+	return seen, nil
+}
+
+func atomResultRelPath(result storage.SearchResult, scanRoot, moduleRelPath string) string {
+	if fp, ok := result.Metadata["filepath"].(string); ok && fp != "" {
+		return normalizeAtomFilepath(fp, scanRoot, moduleRelPath)
+	}
+	return ""
+}
+
+func normalizeAtomFilepath(pathValue, scanRoot, moduleRelPath string) string {
+	pathValue = filepath.ToSlash(pathValue)
+	scanRoot = filepath.ToSlash(scanRoot)
+	moduleRelPath = filepath.ToSlash(moduleRelPath)
+
+	if pathValue == "" {
+		return ""
+	}
+	if filepath.IsAbs(pathValue) {
+		if rel, err := filepath.Rel(scanRoot, pathValue); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+		if moduleRelPath != "" {
+			marker := "/" + moduleRelPath + "/"
+			if idx := strings.LastIndex(pathValue, marker); idx >= 0 {
+				return pathValue[idx+1:]
+			}
+			if strings.HasSuffix(pathValue, "/"+moduleRelPath) {
+				return moduleRelPath
+			}
+		}
+		return filepath.Base(pathValue)
+	}
+	return pathValue
+}
+
+func updateManifestForFiles(mf *manifest.Manifest, root string, files []string, result *Result) {
+	for _, relPath := range files {
+		absPath := filepath.Join(root, relPath)
+		hash, hashErr := mf.ComputeHash(absPath)
+		if hashErr != nil {
+			log.Printf("pipeline: warning: hash failed for %s: %v", relPath, hashErr)
+			result.Errors = append(result.Errors, fmt.Errorf("hash failed for %s: %w", relPath, hashErr))
+			continue
+		}
+		info, statErr := os.Stat(absPath)
+		if statErr != nil {
+			continue
+		}
+		mf.UpdateFile(relPath, hash, info.Size())
+	}
 }
 
 // findModuleAnalysis looks up a ModuleAnalysis by module name.
@@ -679,21 +915,4 @@ func buildPatternsInput(projectName string, synthesis *analyzer.SystemSynthesis,
 	}
 
 	return input
-}
-
-// formatAtomEntry formats an atom as a searchable text entry for storage.
-func formatAtomEntry(a *atoms.Atom) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s (%s) in %s:%d-%d\n", a.Name, a.Kind, a.FilePath, a.StartLine, a.EndLine)
-	fmt.Fprintf(&b, "Summary: %s\n", a.Summary)
-	if len(a.Imports) > 0 {
-		fmt.Fprintf(&b, "Imports: %s\n", strings.Join(a.Imports, ", "))
-	}
-	if len(a.Exports) > 0 {
-		fmt.Fprintf(&b, "Exports: %s\n", strings.Join(a.Exports, ", "))
-	}
-	if a.ClarifiedCode != "" {
-		fmt.Fprintf(&b, "\n%s\n", a.ClarifiedCode)
-	}
-	return b.String()
 }

@@ -27,7 +27,7 @@ func newRootWithImport() *cobra.Command {
 }
 
 // =========================================================================
-// TestImportCmd_AddStrategy — pipe NDJSON via stdin, verify add-batch called
+// TestImportCmd_AddStrategy — pipe NDJSON via stdin, verify upsert-batch called
 // =========================================================================
 
 func TestImportCmd_AddStrategy(t *testing.T) {
@@ -38,12 +38,12 @@ func TestImportCmd_AddStrategy(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/memory/add-batch":
+		case "/memory/upsert-batch":
 			batchCalled++
 			body, _ := io.ReadAll(r.Body)
 			receivedBodies = append(receivedBodies, body)
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"ok":true}`))
+			w.Write([]byte(`{"results":[]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -71,7 +71,7 @@ func TestImportCmd_AddStrategy(t *testing.T) {
 	}
 
 	if batchCalled == 0 {
-		t.Error("expected add-batch endpoint to be called at least once")
+		t.Error("expected upsert-batch endpoint to be called at least once")
 	}
 
 	// Verify all 3 records were sent (empty line should be skipped).
@@ -106,10 +106,10 @@ func TestImportCmd_ReplaceStrategy_RequiresConfirmation(t *testing.T) {
 			deleteCalled = true
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"count":5}`))
-		case "/memory/add-batch":
+		case "/memory/upsert-batch":
 			batchCalled = true
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"ok":true}`))
+			w.Write([]byte(`{"results":[]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -137,7 +137,7 @@ func TestImportCmd_ReplaceStrategy_RequiresConfirmation(t *testing.T) {
 		t.Error("delete-by-prefix should NOT have been called without --yes confirmation")
 	}
 	if batchCalled {
-		t.Error("add-batch should NOT have been called when import is cancelled")
+		t.Error("upsert-batch should NOT have been called when import is cancelled")
 	}
 }
 
@@ -159,10 +159,10 @@ func TestImportCmd_ReplaceStrategy_WithYes(t *testing.T) {
 			deleteBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"count":10}`))
-		case "/memory/add-batch":
+		case "/memory/upsert-batch":
 			batchCalled = true
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"ok":true}`))
+			w.Write([]byte(`{"results":[]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -200,7 +200,7 @@ func TestImportCmd_ReplaceStrategy_WithYes(t *testing.T) {
 	}
 
 	if !batchCalled {
-		t.Error("expected add-batch endpoint to be called after delete")
+		t.Error("expected upsert-batch endpoint to be called after delete")
 	}
 }
 
@@ -233,9 +233,9 @@ func TestImportCmd_JSONEnvelope(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/memory/add-batch":
+		case "/memory/upsert-batch":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"ok":true}`))
+			w.Write([]byte(`{"results":[]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

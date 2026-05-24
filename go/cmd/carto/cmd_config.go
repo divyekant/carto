@@ -45,26 +45,26 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	// Non-sensitive config fields for display.
 	// Sensitive fields (keys/tokens) are never printed in plain text.
 	configMap := map[string]string{
-		"memories_url":     cfg.MemoriesURL,
-		"fast_model":       cfg.FastModel,
-		"deep_model":       cfg.DeepModel,
-		"max_concurrent":   fmt.Sprintf("%d", cfg.MaxConcurrent),
-		"fast_max_tokens":  fmt.Sprintf("%d", cfg.FastMaxTokens),
-		"deep_max_tokens":  fmt.Sprintf("%d", cfg.DeepMaxTokens),
-		"llm_provider":     cfg.LLMProvider,
-		"llm_base_url":     cfg.LLMBaseURL,
-		"profile":          profile,
-		"audit_log":        cfg.AuditLogFile,
+		"memories_url":    cfg.MemoriesURL,
+		"fast_model":      cfg.FastModel,
+		"deep_model":      cfg.DeepModel,
+		"max_concurrent":  fmt.Sprintf("%d", cfg.MaxConcurrent),
+		"fast_max_tokens": fmt.Sprintf("%d", cfg.FastMaxTokens),
+		"deep_max_tokens": fmt.Sprintf("%d", cfg.DeepMaxTokens),
+		"llm_provider":    cfg.LLMProvider,
+		"llm_base_url":    cfg.LLMBaseURL,
+		"profile":         profile,
+		"audit_log":       cfg.AuditLogFile,
 		// Show credential presence (masked, not the actual values).
-		"anthropic_key":    maskPresence(cfg.AnthropicKey),
-		"llm_api_key":      maskPresence(cfg.LLMApiKey),
-		"memories_key":     maskPresence(cfg.MemoriesKey),
-		"github_token":     maskPresence(cfg.GitHubToken),
-		"jira_token":       maskPresence(cfg.JiraToken),
-		"linear_token":     maskPresence(cfg.LinearToken),
-		"notion_token":     maskPresence(cfg.NotionToken),
-		"slack_token":      maskPresence(cfg.SlackToken),
-		"server_token":     maskPresence(cfg.ServerToken),
+		"anthropic_key": maskPresence(cfg.AnthropicKey),
+		"llm_api_key":   maskPresence(cfg.LLMApiKey),
+		"memories_key":  maskPresence(cfg.MemoriesKey),
+		"github_token":  maskPresence(cfg.GitHubToken),
+		"jira_token":    maskPresence(cfg.JiraToken),
+		"linear_token":  maskPresence(cfg.LinearToken),
+		"notion_token":  maskPresence(cfg.NotionToken),
+		"slack_token":   maskPresence(cfg.SlackToken),
+		"server_token":  maskPresence(cfg.ServerToken),
 	}
 
 	if len(args) == 1 {
@@ -141,7 +141,7 @@ Writable keys:
   max_concurrent    Maximum concurrent LLM calls (integer ≥ 1)
   fast_max_tokens   Max output tokens for fast model calls (integer)
   deep_max_tokens   Max output tokens for deep model calls (integer)
-  llm_provider      LLM provider: anthropic | openai | ollama
+  llm_provider      LLM provider: anthropic | openai | ollama | codex
   llm_base_url      Base URL for OpenAI-compatible providers
 
 Use 'carto auth set-key' to store API keys and tokens securely.`,
@@ -277,11 +277,11 @@ func runConfigPath(cmd *cobra.Command, _ []string) error {
 	active := config.ConfigPath
 
 	type paths struct {
-		ConfigDir     string `json:"config_dir"`
-		DefaultFile   string `json:"default_file"`
-		ActiveFile    string `json:"active_file,omitempty"`
-		DirExists     bool   `json:"dir_exists"`
-		FileExists    bool   `json:"file_exists"`
+		ConfigDir   string `json:"config_dir"`
+		DefaultFile string `json:"default_file"`
+		ActiveFile  string `json:"active_file,omitempty"`
+		DirExists   bool   `json:"dir_exists"`
+		FileExists  bool   `json:"file_exists"`
 	}
 
 	_, dirErr := os.Stat(cfgDir)

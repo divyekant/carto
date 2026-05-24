@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -107,6 +107,22 @@ const PROVIDER_DEFAULTS: Record<string, ProviderConfig> = {
       { value: 'mistral', label: 'Mistral 7B', description: 'Versatile 7B model' },
     ],
   },
+  codex: {
+    fast: 'gpt-5.4-mini',
+    deep: 'gpt-5.5',
+    baseUrl: '',
+    keyPlaceholder: '(uses Codex login)',
+    fastModels: [
+      { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Fast Codex subscription model' },
+      { value: 'gpt-5.4', label: 'GPT-5.4', description: 'Balanced Codex subscription model' },
+      { value: 'gpt-5.5', label: 'GPT-5.5', description: 'Highest quality' },
+    ],
+    deepModels: [
+      { value: 'gpt-5.5', label: 'GPT-5.5', description: 'Highest quality' },
+      { value: 'gpt-5.4', label: 'GPT-5.4', description: 'Balanced Codex subscription model' },
+      { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Fastest' },
+    ],
+  },
 }
 
 const CUSTOM_MODEL_VALUE = '__custom__'
@@ -165,7 +181,7 @@ function validate(config: Config): ValidationErrors {
   }
 
   // ── Base URL ──
-  if (provider && provider !== 'anthropic' && !config.llm_base_url) {
+  if (provider && provider !== 'anthropic' && provider !== 'codex' && !config.llm_base_url) {
     errors.baseUrl = 'Base URL is required for ' + provider
   }
   if (config.llm_base_url && !config.llm_base_url.match(/^https?:\/\//)) {
@@ -271,26 +287,18 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
   error?: string
 }) {
   const isCustom = value !== '' && !models.some(m => m.value === value)
-  const [showCustomInput, setShowCustomInput] = useState(isCustom)
+  const [customMode, setCustomMode] = useState(isCustom)
   const [customValue, setCustomValue] = useState(isCustom ? value : '')
-
-  const prevModelsRef = useRef(models)
-  useEffect(() => {
-    if (prevModelsRef.current !== models) {
-      prevModelsRef.current = models
-      const stillCustom = value !== '' && !models.some(m => m.value === value)
-      setShowCustomInput(stillCustom)
-      setCustomValue(stillCustom ? value : '')
-    }
-  }, [models, value])
+  const showCustomInput = customMode || isCustom
+  const displayedCustomValue = isCustom ? value : customValue
 
   function handleSelectChange(v: string) {
     if (v === CUSTOM_MODEL_VALUE) {
-      setShowCustomInput(true)
+      setCustomMode(true)
       setCustomValue('')
       onChange('')
     } else {
-      setShowCustomInput(false)
+      setCustomMode(false)
       setCustomValue('')
       onChange(v)
     }
@@ -321,7 +329,7 @@ function ModelSelect({ label, description, models, value, onChange, error }: {
       {showCustomInput && (
         <Input
           placeholder="e.g. my-custom-model"
-          value={customValue}
+          value={displayedCustomValue}
           onChange={(e) => {
             setCustomValue(e.target.value)
             onChange(e.target.value)
@@ -368,15 +376,37 @@ export default function Settings() {
   const [touched, setTouched] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/config').then(r => r.json()),
-      fetch('/api/health').then(r => r.json()),
-    ]).then(([configData, healthData]) => {
-      const memoriesUrl = configData.memories_url?.replace('host.docker.internal', 'localhost') || configData.memories_url
-      setConfig({ ...configData, memories_url: memoriesUrl })
-      setIsDockerEnv(healthData.docker === true)
-    }).catch(console.error)
-      .finally(() => setLoading(false))
+    let mounted = true
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 2000)
+
+    fetch('/api/config')
+      .then(r => r.json())
+      .then((configData) => {
+        if (!mounted) return
+        const memoriesUrl = configData.memories_url?.replace('host.docker.internal', 'localhost') || configData.memories_url
+        setConfig({ ...configData, memories_url: memoriesUrl })
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    fetch('/api/health', { signal: controller.signal })
+      .then(r => r.json())
+      .then((healthData) => {
+        if (mounted) setIsDockerEnv(healthData.docker === true)
+      })
+      .catch(() => {
+        // Settings should remain usable even when dependency health is slow.
+      })
+      .finally(() => window.clearTimeout(timeout))
+
+    return () => {
+      mounted = false
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
   }, [])
 
   function updateField(key: keyof Config, value: string | number) {
@@ -428,6 +458,7 @@ export default function Settings() {
         fast_model: config.fast_model,
         deep_model: config.deep_model,
         memories_url: config.memories_url,
+        llm_base_url: config.llm_base_url || '',
         max_concurrent: config.max_concurrent,
         fast_max_tokens: config.fast_max_tokens,
         deep_max_tokens: config.deep_max_tokens,
@@ -436,7 +467,6 @@ export default function Settings() {
       if (config.anthropic_key && !config.anthropic_key.includes('****')) patch.anthropic_key = config.anthropic_key
       if (config.llm_api_key && !config.llm_api_key.includes('****')) patch.llm_api_key = config.llm_api_key
       if (config.memories_key && !config.memories_key.includes('****')) patch.memories_key = config.memories_key
-      if (config.llm_base_url) patch.llm_base_url = config.llm_base_url
       if (config.github_token && !config.github_token.includes('****')) patch.github_token = config.github_token
       if (config.jira_token && !config.jira_token.includes('****')) patch.jira_token = config.jira_token
       if (config.jira_email) patch.jira_email = config.jira_email
@@ -508,10 +538,10 @@ export default function Settings() {
     )
   }
 
-  const provider = config.llm_provider || 'anthropic'
-  const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.anthropic
-  const showBaseUrl = provider !== 'anthropic'
-  const showLlmApiKey = provider !== 'anthropic'
+  const provider = config.llm_provider || 'codex'
+  const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.codex
+  const showBaseUrl = provider !== 'anthropic' && provider !== 'codex'
+  const showLlmApiKey = provider !== 'anthropic' && provider !== 'codex'
 
   return (
     <div className="space-y-6">
@@ -544,6 +574,7 @@ export default function Settings() {
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="openai">OpenAI-Compatible</SelectItem>
                   <SelectItem value="ollama">Ollama</SelectItem>
+                  <SelectItem value="codex">Codex Subscription</SelectItem>
                 </SelectContent>
               </Select>
               {fieldError('llm_provider', errors.provider) && (
@@ -590,6 +621,12 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {provider === 'codex' && (
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-400">
+              Uses the local Codex ChatGPT session from <code className="text-xs bg-muted px-1 rounded">~/.codex/auth.json</code>.
+            </div>
+          )}
 
           {/* Base URL */}
           {showBaseUrl && (

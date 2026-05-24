@@ -64,7 +64,7 @@ const FALLBACK: AboutData = {
   how_it_works: '',
   features: [
     'Semantic code search across your entire repository',
-    'LLM-powered module intent extraction (Anthropic, OpenAI, Ollama)',
+    'LLM-powered module intent extraction through Codex, Anthropic, OpenAI, or Ollama',
     'Layered storage: atoms → modules → blueprints → patterns',
     'CLAUDE.md and .cursorrules generator for AI assistant context',
     'GitHub, Jira, Linear, Notion, Slack, PDF source connectors',

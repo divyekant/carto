@@ -28,12 +28,20 @@ type ModuleInput struct {
 	Signals []sources.Artifact
 }
 
-// Dependency represents a cross-unit connection with intent.
-type Dependency struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Reason string `json:"reason"`
+// WiringEdge represents a cross-unit connection with graph-native fields.
+type WiringEdge struct {
+	FromAtom   string `json:"from_atom"`
+	ToAtom     string `json:"to_atom"`
+	FromModule string `json:"from_module"`
+	ToModule   string `json:"to_module"`
+	LinkType   string `json:"link_type"`
+	Reason     string `json:"reason"`
 }
+
+const (
+	maxWiringEdges = 50
+	deepAttempts   = 3
+)
 
 // Zone represents a business domain grouping.
 type Zone struct {
@@ -45,7 +53,7 @@ type Zone struct {
 // ModuleAnalysis is the output of per-module deep-tier analysis.
 type ModuleAnalysis struct {
 	ModuleName   string       `json:"module_name"`
-	Wiring       []Dependency `json:"wiring"`
+	Wiring       []WiringEdge `json:"wiring"`
 	Zones        []Zone       `json:"zones"`
 	ModuleIntent string       `json:"module_intent"`
 }
@@ -129,9 +137,11 @@ func buildModulePrompt(input ModuleInput) string {
 		b.WriteString("\n")
 	}
 
+	b.WriteString("Keep the response small enough to finish: return valid compact JSON only, use at most 20 wiring edges, at most 12 zones, at most 20 files per zone, and concise strings.\n\n")
+
 	b.WriteString(`Produce a JSON object with these fields:
 - "module_name": the module name
-- "wiring": array of {"from": "<unit>", "to": "<unit>", "reason": "<why connected>"}
+- "wiring": array of {"from_atom": "<name>", "from_module": "<module>", "to_atom": "<name>", "to_module": "<module>", "link_type": "related_to|blocked_by|caused_by", "reason": "<why>"}
 - "zones": array of {"name": "<domain>", "intent": "<purpose statement>", "files": ["<path>", ...]}
 - "module_intent": a 1-3 sentence summary of the module's purpose
 `)
@@ -150,25 +160,37 @@ func buildModulePrompt(input ModuleInput) string {
 func (d *DeepAnalyzer) AnalyzeModule(module ModuleInput) (*ModuleAnalysis, error) {
 	prompt := buildModulePrompt(module)
 
-	raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
-		System:    "You are a software architecture analyst. Analyze this module and respond with JSON.",
-		MaxTokens: d.maxTokens,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("analyzer: LLM call failed for module %q: %w", module.Name, err)
+	var lastErr error
+	for attempt := 0; attempt < deepAttempts; attempt++ {
+		raw, err := d.llm.CompleteJSON(prompt, llm.TierDeep, &llm.CompleteOptions{
+			System:    "You are a software architecture analyst. Analyze this module and respond with JSON.",
+			MaxTokens: d.maxTokens,
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("analyzer: LLM call failed for module %q: %w", module.Name, err)
+			continue
+		}
+
+		var result ModuleAnalysis
+		if err := json.Unmarshal(raw, &result); err != nil {
+			lastErr = fmt.Errorf("analyzer: failed to parse LLM response for module %q: %w", module.Name, err)
+			continue
+		}
+
+		// Ensure the module name is set even if the LLM omitted it.
+		if result.ModuleName == "" {
+			result.ModuleName = module.Name
+		}
+
+		// Cap wiring edges to prevent unbounded output.
+		if len(result.Wiring) > maxWiringEdges {
+			result.Wiring = result.Wiring[:maxWiringEdges]
+		}
+
+		return &result, nil
 	}
 
-	var result ModuleAnalysis
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("analyzer: failed to parse LLM response for module %q: %w", module.Name, err)
-	}
-
-	// Ensure the module name is set even if the LLM omitted it.
-	if result.ModuleName == "" {
-		result.ModuleName = module.Name
-	}
-
-	return &result, nil
+	return nil, lastErr
 }
 
 // buildSynthesisPrompt constructs the user prompt for system-level synthesis.
@@ -191,7 +213,7 @@ func buildSynthesisPrompt(modules []ModuleAnalysis) string {
 		if len(m.Wiring) > 0 {
 			b.WriteString("Wiring:\n")
 			for _, w := range m.Wiring {
-				fmt.Fprintf(&b, "  - %s -> %s: %s\n", w.From, w.To, w.Reason)
+				fmt.Fprintf(&b, "  - %s -> %s: %s\n", w.FromAtom, w.ToAtom, w.Reason)
 			}
 		}
 

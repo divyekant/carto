@@ -36,17 +36,21 @@ func Index(path string, opts IndexOptions) (*IndexResult, error) {
 	if apiKey == "" {
 		apiKey = cfg.AnthropicKey
 	}
-	if apiKey == "" && cfg.LLMProvider != "ollama" {
+	if apiKey == "" && cfg.RequiresProviderAPIKey() {
 		return nil, fmt.Errorf("carto: no API key set; set LLM_API_KEY or ANTHROPIC_API_KEY")
 	}
 
-	llmClient := llm.NewClient(llm.Options{
+	llmClient, err := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
 		MaxConcurrent: cfg.MaxConcurrent,
 		BaseURL:       cfg.LLMBaseURL,
+		IsOAuth:       config.IsOAuthToken(apiKey),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("carto: create LLM provider %q: %w", cfg.LLMProvider, err)
+	}
 
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
@@ -109,7 +113,7 @@ func Query(text string, opts QueryOptions) ([]QueryResult, error) {
 		searchOpts.K = opts.K * 3
 	}
 
-	results, err := memoriesClient.Search(text, searchOpts)
+	results, err := memoriesClient.SearchAdvanced(text, searchOpts)
 	if err != nil {
 		return nil, fmt.Errorf("carto: query: %w", err)
 	}

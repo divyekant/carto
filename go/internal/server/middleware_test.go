@@ -108,9 +108,9 @@ func TestBearerAuth_SPAAssetsPassThrough(t *testing.T) {
 // rateLimiter tests
 // =========================================================================
 
-func TestRateLimiter_AllowsBurstOf10(t *testing.T) {
+func TestRateLimiter_AllowsBurstOf30(t *testing.T) {
 	rl := newRateLimiter()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		if !rl.Allow("1.2.3.4") {
 			t.Fatalf("request %d of burst should be allowed", i+1)
 		}
@@ -119,19 +119,19 @@ func TestRateLimiter_AllowsBurstOf10(t *testing.T) {
 
 func TestRateLimiter_BlocksAfterBurstExhausted(t *testing.T) {
 	rl := newRateLimiter()
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		rl.Allow("1.2.3.4")
 	}
-	// 11th request should be blocked.
+	// 31st request should be blocked.
 	if rl.Allow("1.2.3.4") {
-		t.Error("11th consecutive request should be rate-limited")
+		t.Error("31st consecutive request should be rate-limited")
 	}
 }
 
 func TestRateLimiter_DifferentIPsAreIndependent(t *testing.T) {
 	rl := newRateLimiter()
 	// Exhaust IP A.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		rl.Allow("1.1.1.1")
 	}
 	// IP B should still be allowed.
@@ -147,7 +147,7 @@ func TestRateLimitMiddleware_Returns429WhenExhausted(t *testing.T) {
 	// Exhaust the bucket from the test's RemoteAddr.
 	req := httptest.NewRequest("GET", "/api/projects", nil)
 	req.RemoteAddr = "1.2.3.4:12345"
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		rl.Allow("1.2.3.4")
 	}
 

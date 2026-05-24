@@ -55,14 +55,14 @@ func TestQueryResultFields(t *testing.T) {
 	}
 }
 
-func TestIndexNoAPIKey(t *testing.T) {
-	// Clear all API key env vars to ensure the SDK returns the proper error.
+func TestIndexAnthropicNoAPIKey(t *testing.T) {
+	// Anthropic still requires a provider API key; codex session auth does not.
 	origLLM := os.Getenv("LLM_API_KEY")
 	origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
 	origProvider := os.Getenv("LLM_PROVIDER")
 	os.Unsetenv("LLM_API_KEY")
 	os.Unsetenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("LLM_PROVIDER")
+	os.Setenv("LLM_PROVIDER", "anthropic")
 	defer func() {
 		if origLLM != "" {
 			os.Setenv("LLM_API_KEY", origLLM)
@@ -72,6 +72,8 @@ func TestIndexNoAPIKey(t *testing.T) {
 		}
 		if origProvider != "" {
 			os.Setenv("LLM_PROVIDER", origProvider)
+		} else {
+			os.Unsetenv("LLM_PROVIDER")
 		}
 	}()
 

@@ -175,6 +175,12 @@ func (l *loggingResponseWriter) Write(b []byte) (int, error) {
 	return l.ResponseWriter.Write(b)
 }
 
+func (l *loggingResponseWriter) Flush() {
+	if flusher, ok := l.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // loggingMiddleware emits a structured JSON log line for every HTTP request,
 // including method, path, response status code, latency in milliseconds, and
 // the X-Request-ID for log correlation. Compatible with Datadog, CloudWatch,
@@ -243,8 +249,8 @@ func newRateLimiter() *rateLimiter {
 // Default parameters: 60 requests/minute capacity, 10-request burst.
 func (rl *rateLimiter) Allow(ip string) bool {
 	const (
-		ratePerSec = 1.0  // 60 req/min = 1 req/sec
-		burst      = 10.0 // initial and max token count
+		ratePerSec = 5.0  // 300 req/min = 5 req/sec
+		burst      = 30.0 // initial and max token count
 	)
 
 	rl.mu.Lock()

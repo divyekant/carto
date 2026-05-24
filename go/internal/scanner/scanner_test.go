@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -330,6 +331,38 @@ func TestDetectModules_MultipleModules(t *testing.T) {
 	}
 }
 
+func TestDetectModules_GroupsFilesOutsideNestedManifests(t *testing.T) {
+	root := t.TempDir()
+
+	createFile(t, filepath.Join(root, "dashboard", "web", "package.json"), `{"name": "web"}`)
+	createFile(t, filepath.Join(root, "dashboard", "web", "index.ts"), "export default {}")
+	createFile(t, filepath.Join(root, "billing", "src", "Billing.java"), "class Billing {}")
+	createFile(t, filepath.Join(root, "core", "src", "Core.java"), "class Core {}")
+
+	files := []FileInfo{
+		{Path: filepath.Join(root, "dashboard", "web", "package.json"), RelPath: filepath.Join("dashboard", "web", "package.json"), Language: "json"},
+		{Path: filepath.Join(root, "dashboard", "web", "index.ts"), RelPath: filepath.Join("dashboard", "web", "index.ts"), Language: "typescript"},
+		{Path: filepath.Join(root, "billing", "src", "Billing.java"), RelPath: filepath.Join("billing", "src", "Billing.java"), Language: "java"},
+		{Path: filepath.Join(root, "core", "src", "Core.java"), RelPath: filepath.Join("core", "src", "Core.java"), Language: "java"},
+	}
+
+	modules := DetectModules(root, files)
+	byName := map[string]Module{}
+	for _, mod := range modules {
+		byName[mod.Name] = mod
+	}
+
+	if _, ok := byName["web"]; !ok {
+		t.Fatalf("expected manifest-backed web module, got %#v", modules)
+	}
+	if billing := byName["billing"]; len(billing.Files) != 1 || billing.Files[0] != filepath.Join("billing", "src", "Billing.java") {
+		t.Fatalf("expected synthetic billing module for unassigned file, got %#v", billing)
+	}
+	if core := byName["core"]; len(core.Files) != 1 || core.Files[0] != filepath.Join("core", "src", "Core.java") {
+		t.Fatalf("expected synthetic core module for unassigned file, got %#v", core)
+	}
+}
+
 func TestDetectModules_NoManifest(t *testing.T) {
 	root := t.TempDir()
 
@@ -380,6 +413,49 @@ func TestDetectModules_RustCargo(t *testing.T) {
 	}
 	if m.Type != "rust" {
 		t.Errorf("module type = %q, want %q", m.Type, "rust")
+	}
+}
+
+func TestResolveModuleFilterSupportsPathAndRejectsAmbiguousName(t *testing.T) {
+	modules := []Module{
+		{Name: "dao", RelPath: "core/cdp/dao", Path: "/repo/core/cdp/dao"},
+		{Name: "dao", RelPath: "core/dao", Path: "/repo/core/dao"},
+		{Name: "nb", RelPath: "core/nb", Path: "/repo/core/nb"},
+	}
+
+	byPath, err := ResolveModuleFilter(modules, "core/dao")
+	if err != nil {
+		t.Fatalf("ResolveModuleFilter by path returned error: %v", err)
+	}
+	if len(byPath) != 1 || byPath[0].RelPath != "core/dao" {
+		t.Fatalf("ResolveModuleFilter by path = %+v, want core/dao", byPath)
+	}
+
+	_, err = ResolveModuleFilter(modules, "dao")
+	if err == nil {
+		t.Fatal("expected ambiguous bare module name to fail")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "core/dao") || !strings.Contains(err.Error(), "core/cdp/dao") {
+		t.Fatalf("ambiguous error = %v, want both module paths", err)
+	}
+
+	byName, err := ResolveModuleFilter(modules, "nb")
+	if err != nil {
+		t.Fatalf("ResolveModuleFilter by unambiguous name returned error: %v", err)
+	}
+	if len(byName) != 1 || byName[0].Name != "nb" {
+		t.Fatalf("ResolveModuleFilter by name = %+v, want nb", byName)
+	}
+}
+
+func TestResolveModuleFilterReportsAvailableChoices(t *testing.T) {
+	modules := []Module{{Name: "api", RelPath: "services/api"}}
+	_, err := ResolveModuleFilter(modules, "missing")
+	if err == nil {
+		t.Fatal("expected missing module error")
+	}
+	if !strings.Contains(err.Error(), "available") || !strings.Contains(err.Error(), "api (services/api)") {
+		t.Fatalf("missing error = %v, want available choices", err)
 	}
 }
 

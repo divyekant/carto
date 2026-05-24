@@ -1,5 +1,7 @@
 # Carto Architecture
 
+Visual companion: [System Architecture Visual](system-architecture-visual.html)
+
 ## 1. System Overview
 
 Carto is an intent-aware codebase intelligence tool. It scans a codebase
@@ -11,9 +13,11 @@ summaries to system-wide architectural blueprints.
 
 Carto is written in pure Go (module `github.com/divyekant/carto`). The only
 CGO dependency is Tree-sitter, which embeds C parsers for AST-based code
-chunking. The system communicates with two external services over HTTP: the
-Anthropic Messages API for LLM inference and a [Memories](https://github.com/divyekant/memories) server for
-vector storage and retrieval.
+chunking. The system communicates with two external services over HTTP: a
+configured LLM execution backend and a [Memories](https://github.com/divyekant/memories) server for
+vector storage and retrieval. The default LLM backend is the user's local Codex
+ChatGPT session, read from `~/.codex/auth.json`, so normal local operation does
+not require separate provider API keys.
 
 ### Core Capabilities
 
@@ -292,8 +296,8 @@ specific purpose in the context hierarchy:
 - **Content**: Cross-component dependency graph with intent annotations
 - **Source**: `analyzer.DeepAnalyzer.AnalyzeModule()` via deep-tier LLM
 - **LLM cost**: One deep-tier call per module (low volume, high cost)
-- **Schema**: `analyzer.Dependency` -- `From` (source unit), `To` (target
-  unit), `Reason` (why they are connected)
+- **Schema**: `analyzer.WiringEdge` -- `From` (source unit), `To` (target
+  unit), `Kind` (relationship type), `Reason` (why they are connected)
 - **Memories tag**: `carto/{project}/{module}/layer:wiring`
 - **Purpose**: Architectural connectivity; answers "what depends on what
   and why"
@@ -331,7 +335,7 @@ Carto uses two model tiers to balance cost, speed, and analytical depth:
 
 ### Fast Tier (High-Volume, Low-Cost)
 
-- **Default model**: `claude-haiku-4-5-20251001`
+- **Default model**: `gpt-5.4-mini` (codex provider) / `claude-haiku-4-5-20251001` (anthropic)
 - **Configurable via**: `CARTO_FAST_MODEL` environment variable
 - **Used for**: Atom analysis (Layer 1a)
 - **Call pattern**: One call per code chunk -- high volume
@@ -341,7 +345,7 @@ Carto uses two model tiers to balance cost, speed, and analytical depth:
 
 ### Deep Tier (Low-Volume, High-Cost)
 
-- **Default model**: `claude-opus-4-6`
+- **Default model**: `gpt-5.5` (codex provider) / `claude-opus-4-6` (anthropic)
 - **Configurable via**: `CARTO_DEEP_MODEL` environment variable
 - **Used for**: Per-module deep analysis (Layer 2+3) and system synthesis
   (Layer 4)
@@ -378,12 +382,13 @@ go func() {
 The LLM client's `CompleteJSON()` method extracts JSON from model responses
 by:
 1. Stripping markdown code fences (` ```json ... ``` `)
-2. Finding the first `{` character
-3. Walking forward to find the matching `}` while tracking brace depth
-   and string escaping
+2. Finding the first `{` or `[` character (whichever appears first)
+3. Walking forward to find the matching closing delimiter while tracking
+   depth and string escaping
 4. Validating the extracted JSON with `json.Valid()`
 
-This makes the system resilient to models wrapping JSON in prose or markdown.
+This makes the system resilient to models wrapping JSON in prose or markdown,
+and supports both object and array responses.
 
 ---
 
@@ -436,7 +441,7 @@ The manifest is stored at `{projectRoot}/.carto/manifest.json` and tracks:
 
 ```go
 type Manifest struct {
-    Version   string                   // "1.0"
+    Version   string                   // "2.0"
     Project   string                   // project name
     IndexedAt time.Time                // last indexing timestamp
     Files     map[string]FileEntry     // keyed by relative path
@@ -462,6 +467,10 @@ When `--incremental` is enabled:
    - **Added**: files present on disk but absent from the manifest
    - **Modified**: files whose SHA-256 hash differs from the manifest entry
    - **Removed**: files in the manifest but no longer on disk
+
+The manifest is updated only for modules whose atom extraction and atom storage
+completed. This prevents partial Memories writes from being treated as a clean
+incremental baseline during later retries.
 
 3. **Process changes**:
    - Only `Added` and `Modified` files are sent through Phase 2-4
@@ -560,18 +569,21 @@ an acceptable tradeoff because:
   chunks
 - CGO is isolated to a single package (`internal/chunker`)
 
-### HTTP-Based LLM Client (Not SDK)
+### HTTP-Based LLM Clients (Not SDKs)
 
-The `llm.Client` communicates with the Anthropic API via raw HTTP requests
-rather than using an SDK. This provides:
-- Full control over OAuth token refresh flow (double-checked locking pattern)
-- Custom header management (OAuth beta headers, User-Agent)
+The LLM package communicates with providers via raw HTTP requests rather than
+provider SDKs. This provides:
+- Full control over Codex session and Anthropic OAuth token refresh flows
+- Custom header management (Codex account headers, OAuth beta headers, User-Agent)
 - Direct control over the request/response JSON schema
 - No dependency on SDK release cycles
-- Support for both API key and OAuth authentication modes
+- Support for Codex session auth, provider API keys, and Anthropic OAuth
 
-The client supports the `sk-ant-oat01-` prefix detection for automatic OAuth
-mode switching.
+`llm.CodexProvider` reads ChatGPT-backed Codex auth from `CODEX_HOME/auth.json`
+or `~/.codex/auth.json`, refreshes expired tokens when possible, streams
+Responses API output, and retries transient 429/HTTP2 stream failures with
+backoff. The Anthropic client still supports `sk-ant-oat01-` prefix detection
+for automatic OAuth mode switching.
 
 ### Memories as External Service
 
@@ -581,16 +593,22 @@ as a library. This:
 - Allows the Memories index to be shared across tools (CLI, IDE plugins, etc.)
 - Avoids embedding a large C++ dependency
 - Enables scaling the storage layer independently
-- Uses a REST interface: `/memory/add`, `/memory/add-batch`, `/search`,
-  `/memories`, `/memories/count`, `/memory/delete-by-prefix`, `/memory/{id}`
-  (DELETE)
+- Uses a REST interface: `/memory/add`, `/memory/upsert-batch`, `/search`,
+  `/search/advanced`, `/memories`, `/memories/count`,
+  `/memory/delete-by-prefix`, `/memory/{id}` (DELETE), `/memory/link`
 - Search supports `source_prefix` filtering for project-scoped queries
+- Advanced search supports 6-signal ranking (graph, confidence, feedback,
+  temporal, vector, BM25)
+- Bulk upsert via `POST /memory/upsert-batch` with metadata and dedup keys
 - Bulk delete via `POST /memory/delete-by-prefix` with `{source_prefix}`
+- Graph links via `POST /memory/link` (create), `GET /memory/links/{id}`
+  (read), `DELETE /memory/links/{id}` (remove)
 - Count via `GET /memories/count?source=<prefix>`
 - List supports `offset` parameter for pagination (up to 5000 limit)
 
-Batch writes are chunked into groups of 500 (server handles internal chunking
-by 100).
+Batch writes are chunked into groups of 500. Both `UpsertBatch` and
+`DeleteBySource` retry with exponential backoff on transient failures
+(429, 5xx, timeouts).
 
 ### Manifest-Based Incremental Indexing
 
@@ -619,7 +637,8 @@ Every phase operates on a per-module basis:
 
 This enables:
 - Natural parallelism (modules are independent work units)
-- Targeted re-indexing (`--module` flag)
+- Targeted re-indexing (`--module` flag) that refreshes module layers without
+  replacing project-wide blueprint/pattern layers
 - Module-scoped retrieval queries
 - Incremental indexing at the module granularity
 
@@ -719,11 +738,12 @@ This enables:
 cmd/carto/main.go
   |
   +-- internal/config         (environment variable loading)
-  +-- internal/llm            (Anthropic API client)
+  +-- internal/llm            (multi-provider LLM client: Codex, Anthropic, OpenAI, Ollama)
   +-- internal/scanner        (file tree walking, module detection)
   +-- internal/manifest       (SHA-256 tracking, change detection)
   +-- internal/signals        (signal plugin registry)
   +-- internal/storage        (Memories client + Store abstraction)
+  +-- internal/indexplan      (dry-run scan planning)
   +-- internal/pipeline       (orchestrator)
   |     |
   |     +-- internal/scanner

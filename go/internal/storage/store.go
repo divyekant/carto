@@ -51,11 +51,16 @@ const (
 type MemoriesAPI interface {
 	Health() (bool, error)
 	AddMemory(m Memory) (int, error)
-	AddBatch(memories []Memory) error
-	Search(query string, opts SearchOptions) ([]SearchResult, error)
+	UpsertBatch(memories []Memory) ([]UpsertResult, error)
+	Supersede(oldID int, newText string, newMeta map[string]any) (int, error)
+	SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error)
 	ListBySource(source string, limit, offset int) ([]SearchResult, error)
+	DeleteMemory(id int) error
 	DeleteBySource(prefix string) (int, error)
 	Count(sourcePrefix string) (int, error)
+	CreateLink(fromID, toID int, linkType string) error
+	GetLinks(id int) ([]Link, error)
+	DeleteLinks(id int) error
 }
 
 // Store provides domain-specific Memories storage for carto layers.
@@ -100,7 +105,8 @@ func (s *Store) StoreBatch(module, layer string, entries []string) error {
 			Source: tag,
 		}
 	}
-	return s.memories.AddBatch(memories)
+	_, err := s.memories.UpsertBatch(memories)
+	return err
 }
 
 // RetrieveByTier retrieves context at the requested tier level.
@@ -135,15 +141,47 @@ func (s *Store) RetrieveLayer(module, layer string) ([]SearchResult, error) {
 // using a single bulk delete with the module prefix.
 func (s *Store) ClearModule(module string) error {
 	prefix := fmt.Sprintf("carto/%s/%s/", s.project, module)
-	_, err := s.memories.DeleteBySource(prefix)
-	return err
+	if _, err := s.memories.DeleteBySource(prefix); err == nil {
+		return nil
+	}
+	return s.clearByListing(prefix)
 }
 
 // ClearProject deletes all entries for the entire project.
 func (s *Store) ClearProject() error {
 	prefix := fmt.Sprintf("carto/%s/", s.project)
-	_, err := s.memories.DeleteBySource(prefix)
-	return err
+	if _, err := s.memories.DeleteBySource(prefix); err == nil {
+		return nil
+	}
+	return s.clearByListing(prefix)
+}
+
+func (s *Store) clearByListing(prefix string) error {
+	const pageSize = 1000
+	var ids []int
+	for offset := 0; ; {
+		results, err := s.memories.ListBySource(prefix, pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("fallback list %s: %w", prefix, err)
+		}
+		for _, result := range results {
+			ids = append(ids, result.ID)
+		}
+		if len(results) < pageSize {
+			break
+		}
+		offset += len(results)
+	}
+
+	for _, id := range ids {
+		if err := s.memories.DeleteLinks(id); err != nil {
+			return fmt.Errorf("fallback delete links for %d: %w", id, err)
+		}
+		if err := s.memories.DeleteMemory(id); err != nil {
+			return fmt.Errorf("fallback delete memory %d: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // truncate shortens content to at most maxLen characters. It cuts at the last

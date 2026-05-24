@@ -3,8 +3,8 @@ package main
 // cmd_auth.go — B2B credential management commands.
 //
 // The auth command group helps operators inspect, set, and validate the
-// API keys Carto needs to run. All sensitive values are written to the
-// persisted config file (never echoed to stdout in plain text).
+// credentials Carto needs to run. Provider API keys are optional when the
+// Codex session-backed provider is selected.
 //
 // Usage:
 //
@@ -15,6 +15,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ func authCmd() *cobra.Command {
 		Use:   "auth",
 		Short: "Manage Carto credentials",
 		Long: `The auth command group lets you inspect, configure, and validate the
-API keys required by Carto without editing config files manually.`,
+provider credentials used by Carto without editing config files manually.`,
 	}
 	cmd.AddCommand(authStatusCmd())
 	cmd.AddCommand(authSetKeyCmd())
@@ -43,7 +44,8 @@ func authStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show configured credential status",
 		Long: `Displays which API keys and tokens are currently set (masked for security)
-and identifies any gaps that would prevent Carto from running.`,
+and identifies any gaps that would prevent Carto from running. The codex
+provider uses the local Codex ChatGPT session instead of a provider API key.`,
 		RunE: runAuthStatus,
 	}
 }
@@ -56,17 +58,24 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	type credRow struct {
 		Name    string `json:"name"`
-		Status  string `json:"status"`  // "set" | "unset"
-		Masked  string `json:"masked"`  // partial value shown to operator
-		Source  string `json:"source"`  // "env" | "file" | ""
+		Status  string `json:"status"` // "set" | "unset"
+		Masked  string `json:"masked"` // partial value shown to operator
+		Source  string `json:"source"` // "env" | "file" | ""
 		Warning string `json:"warning,omitempty"`
 	}
 
 	apiKey := cfg.EffectiveAPIKey()
 
-	rows := []credRow{
-		credentialRow("LLM API Key", apiKey, requiredForProvider(cfg.LLMProvider)),
-		credentialRow("Anthropic Key", cfg.AnthropicKey, cfg.LLMProvider == "anthropic" || cfg.LLMProvider == ""),
+	rows := []credRow{}
+	if cfg.LLMProvider == "codex" {
+		rows = append(rows, codexSessionCredentialRow())
+	} else {
+		rows = append(rows,
+			credentialRow("LLM API Key", apiKey, requiredForProvider(cfg.LLMProvider)),
+			credentialRow("Anthropic Key", cfg.AnthropicKey, cfg.LLMProvider == "anthropic" || cfg.LLMProvider == ""),
+		)
+	}
+	rows = append(rows,
 		credentialRow("Memories Key", cfg.MemoriesKey, false),
 		credentialRow("GitHub Token", cfg.GitHubToken, false),
 		credentialRow("Jira Token", cfg.JiraToken, false),
@@ -74,7 +83,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		credentialRow("Notion Token", cfg.NotionToken, false),
 		credentialRow("Slack Token", cfg.SlackToken, false),
 		credentialRow("Server Token", cfg.ServerToken, false),
-	}
+	)
 
 	// Annotate warnings.
 	for i := range rows {
@@ -115,7 +124,10 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		}
 		fmt.Println()
 
-		if apiKey == "" {
+		if cfg.LLMProvider == "codex" {
+			fmt.Printf("%s%sReady:%s Carto will use the local Codex ChatGPT session; run %scarto auth validate%s to check it.\n",
+				bold, green, reset, bold, reset)
+		} else if apiKey == "" {
 			printWarn("No effective LLM API key found. Run: carto auth set-key anthropic <key>")
 		} else {
 			fmt.Printf("%s%sReady:%s LLM key is set. Run %scarto auth validate%s to test connectivity.\n",
@@ -213,7 +225,8 @@ func authValidateCmd() *cobra.Command {
 		Use:   "validate",
 		Short: "Test connectivity to the configured LLM provider",
 		Long: `Makes a lightweight HTTP request to the configured LLM provider endpoint
-to verify that the API key is accepted. No LLM tokens are consumed.`,
+to verify that credentials are accepted. For codex, this checks the local
+Codex ChatGPT session file. No LLM tokens are consumed.`,
 		RunE: runAuthValidate,
 	}
 	cmd.Flags().Duration("timeout", 10*time.Second, "Probe timeout")
@@ -232,7 +245,7 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 
 	verboseLog(cmd, "validating provider=%s timeout=%s", provider, timeout)
 
-	if apiKey == "" && provider != "ollama" {
+	if apiKey == "" && requiredForProvider(provider) {
 		printError("No API key configured. Run: carto auth set-key %s <key>", provider)
 		return fmt.Errorf("%w", errAuthFailure("API key not set"))
 	}
@@ -266,6 +279,20 @@ func runAuthValidate(cmd *cobra.Command, _ []string) error {
 			base = "http://localhost:11434"
 		}
 		probeURL = strings.TrimRight(base, "/") + "/api/tags"
+	case "codex":
+		path, err := config.CodexAuthFilePath()
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("codex auth unavailable: %w", err)
+		}
+		res := result{Provider: provider, Status: "reachable", Latency: "0"}
+		writeEnvelopeHuman(cmd, res, nil, func() {
+			fmt.Printf("%s✓%s Codex ChatGPT session found at %s\n", green, reset, path)
+		})
+		logAuditEvent(cmd, "ok", "", map[string]any{"provider": provider})
+		return nil
 	default:
 		return fmt.Errorf("unknown provider %q", provider)
 	}
@@ -353,6 +380,41 @@ func credentialRow(name, val string, required bool) struct {
 		Source  string `json:"source"`
 		Warning string `json:"warning,omitempty"`
 	}{Name: name, Status: "set", Masked: config.MaskSecret(val)}
+}
+
+func codexSessionCredentialRow() struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Masked  string `json:"masked"`
+	Source  string `json:"source"`
+	Warning string `json:"warning,omitempty"`
+} {
+	path, err := config.CodexAuthFilePath()
+	if err != nil {
+		return struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Masked  string `json:"masked"`
+			Source  string `json:"source"`
+			Warning string `json:"warning,omitempty"`
+		}{Name: "Codex Session", Status: "unset", Warning: err.Error()}
+	}
+	if _, err := os.Stat(path); err != nil {
+		return struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Masked  string `json:"masked"`
+			Source  string `json:"source"`
+			Warning string `json:"warning,omitempty"`
+		}{Name: "Codex Session", Status: "unset", Masked: "(not found)", Source: path, Warning: "run codex login"}
+	}
+	return struct {
+		Name    string `json:"name"`
+		Status  string `json:"status"`
+		Masked  string `json:"masked"`
+		Source  string `json:"source"`
+		Warning string `json:"warning,omitempty"`
+	}{Name: "Codex Session", Status: "set", Masked: "(found)", Source: path}
 }
 
 // requiredForProvider returns true if an API key is mandatory for the given

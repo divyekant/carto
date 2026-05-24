@@ -39,6 +39,8 @@ interface LogEntry {
   timestamp: number
 }
 
+type ProjectsResponse = Project[] | { projects?: Project[] }
+
 export default function ProjectDetail() {
   const { name } = useParams<{ name: string }>()
   const navigate = useNavigate()
@@ -47,6 +49,9 @@ export default function ProjectDetail() {
 
   const [indexState, setIndexState] = useState<IndexState>('idle')
   const [incremental, setIncremental] = useState(false)
+  const [repairMissingAtoms, setRepairMissingAtoms] = useState(false)
+  const [atomsOnly, setAtomsOnly] = useState(false)
+  const [maxFiles, setMaxFiles] = useState('')
   const [moduleFilter, setModuleFilter] = useState('')
   const [stopping, setStopping] = useState(false)
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
@@ -63,6 +68,12 @@ export default function ProjectDetail() {
     setIndexState(s)
   }
 
+  function repairBatchMaxFiles() {
+    const parsed = Number(maxFiles)
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0
+    return Math.floor(parsed)
+  }
+
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
@@ -74,9 +85,9 @@ export default function ProjectDetail() {
   useEffect(() => {
     fetch('/api/projects')
       .then(r => r.json())
-      .then((data: Project[]) => {
-        const projects = Array.isArray(data) ? data : (data as any).projects || []
-        const found = projects.find((p: Project) => p.name === name)
+      .then((data: ProjectsResponse) => {
+        const projects = Array.isArray(data) ? data : data.projects || []
+        const found = projects.find((p) => p.name === name)
         setProject(found || null)
       })
       .catch(console.error)
@@ -186,8 +197,12 @@ export default function ProjectDetail() {
       const body: Record<string, unknown> = {
         path: project.path,
         project: project.name,
-        incremental,
+        incremental: repairMissingAtoms ? false : incremental,
+        repair_missing_atoms: repairMissingAtoms,
+        atoms_only: atomsOnly,
       }
+      const maxFilesValue = repairBatchMaxFiles()
+      if (repairMissingAtoms && maxFilesValue > 0) body.max_files = maxFilesValue
       const trimmedModule = moduleFilter.trim()
       if (trimmedModule) body.module = trimmedModule
 
@@ -268,14 +283,41 @@ export default function ProjectDetail() {
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <Switch checked={incremental} onCheckedChange={setIncremental} id="proj-incremental" />
+                  <Switch
+                    checked={incremental}
+                    onCheckedChange={setIncremental}
+                    id="proj-incremental"
+                    disabled={repairMissingAtoms}
+                  />
                   <Label htmlFor="proj-incremental" className="text-xs">Incremental</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={repairMissingAtoms} onCheckedChange={setRepairMissingAtoms} id="proj-repair-missing-atoms" />
+                  <Label htmlFor="proj-repair-missing-atoms" className="text-xs">Repair Missing</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={atomsOnly} onCheckedChange={setAtomsOnly} id="proj-atoms-only" />
+                  <Label htmlFor="proj-atoms-only" className="text-xs">Atoms Only</Label>
                 </div>
                 <div className="flex-1">
                   <Input
                     placeholder="Module filter (optional)"
                     value={moduleFilter}
                     onChange={e => setModuleFilter(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="w-28">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    aria-label="Max files"
+                    placeholder="Max files"
+                    value={maxFiles}
+                    onChange={e => setMaxFiles(e.target.value)}
+                    disabled={!repairMissingAtoms}
                     className="h-8 text-xs"
                   />
                 </div>

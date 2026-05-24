@@ -8,7 +8,7 @@ import (
 	"github.com/divyekant/carto/internal/config"
 )
 
-var version = "1.1.0"
+var version = "2.0.0"
 
 func main() {
 	// Sync version into the config package so the server /api/health
@@ -25,9 +25,9 @@ func main() {
 Run 'carto about' for full product information and brand color palette.
 
 Environment variables:
+  LLM_PROVIDER         Provider: codex | anthropic | openai | ollama (default: codex)
   ANTHROPIC_API_KEY    API key for Anthropic (Claude)
   LLM_API_KEY          Generic LLM API key (overrides ANTHROPIC_API_KEY)
-  LLM_PROVIDER         Provider: anthropic | openai | ollama (default: anthropic)
   LLM_BASE_URL         Base URL for OpenAI-compatible providers
   MEMORIES_URL         URL of the Memories vector store (default: http://localhost:8900)
   MEMORIES_API_KEY     API key for the Memories store
@@ -65,8 +65,8 @@ Environment variables:
 	root.AddCommand(projectsCmd())
 	root.AddCommand(sourcesCmd())
 	root.AddCommand(configCmdGroup())
-	root.AddCommand(authCmd())        // B2B: credential management
-	root.AddCommand(doctorCmd())      // B2B: pre-flight environment diagnostics
+	root.AddCommand(authCmd())           // B2B: credential management
+	root.AddCommand(doctorCmd())         // B2B: pre-flight environment diagnostics
 	root.AddCommand(versionCmd(version)) // structured version info (JSON-capable)
 	root.AddCommand(aboutCmd())          // product identity card and branding guide
 	root.AddCommand(completionsCmd())    // shell completion scripts (bash/zsh/fish/powershell)
@@ -75,6 +75,7 @@ Environment variables:
 	root.AddCommand(importCmd())         // import NDJSON index data
 	root.AddCommand(logsCmd())           // query and tail audit log
 	root.AddCommand(upgradeCmd())        // check for and install new versions
+	root.AddCommand(writebackCmd())      // file-level index updates without full re-index
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

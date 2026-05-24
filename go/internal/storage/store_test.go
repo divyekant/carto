@@ -8,10 +8,13 @@ import (
 
 // mockMemories implements MemoriesAPI for testing.
 type mockMemories struct {
-	memories []Memory
-	batches  [][]Memory
-	results  map[string][]SearchResult // source -> results
-	deleted  []string
+	memories           []Memory
+	batches            [][]Memory
+	results            map[string][]SearchResult // source -> results
+	deleted            []string
+	deletedIDs         []int
+	deletedLinkIDs     []int
+	failDeleteBySource bool
 }
 
 func newMockMemories() *mockMemories {
@@ -27,25 +30,66 @@ func (m *mockMemories) AddMemory(mem Memory) (int, error) {
 	return len(m.memories), nil
 }
 
-func (m *mockMemories) AddBatch(memories []Memory) error {
+func (m *mockMemories) UpsertBatch(memories []Memory) ([]UpsertResult, error) {
 	m.batches = append(m.batches, memories)
 	m.memories = append(m.memories, memories...)
+	results := make([]UpsertResult, len(memories))
+	for i := range memories {
+		results[i] = UpsertResult{ID: len(m.memories) - len(memories) + i + 1, Status: "created"}
+	}
+	return results, nil
+}
+
+func (m *mockMemories) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	return oldID + 1, nil
+}
+
+func (m *mockMemories) SearchAdvanced(query string, opts SearchOptions) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockMemories) DeleteMemory(id int) error {
+	m.deletedIDs = append(m.deletedIDs, id)
 	return nil
 }
 
-func (m *mockMemories) Search(query string, opts SearchOptions) ([]SearchResult, error) {
+func (m *mockMemories) CreateLink(fromID, toID int, linkType string) error {
+	return nil
+}
+
+func (m *mockMemories) GetLinks(id int) ([]Link, error) {
 	return nil, nil
+}
+
+func (m *mockMemories) DeleteLinks(id int) error {
+	m.deletedLinkIDs = append(m.deletedLinkIDs, id)
+	return nil
 }
 
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]SearchResult, error) {
 	if results, ok := m.results[source]; ok {
 		return results, nil
 	}
-	return nil, nil
+	var results []SearchResult
+	for src, entries := range m.results {
+		if strings.HasPrefix(src, source) {
+			results = append(results, entries...)
+		}
+	}
+	if offset >= len(results) {
+		return nil, nil
+	}
+	if limit <= 0 || offset+limit > len(results) {
+		return results[offset:], nil
+	}
+	return results[offset : offset+limit], nil
 }
 
 func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	m.deleted = append(m.deleted, prefix)
+	if m.failDeleteBySource {
+		return 0, fmt.Errorf("delete-by-prefix unavailable")
+	}
 	return 0, nil
 }
 
@@ -280,6 +324,33 @@ func TestClearModule(t *testing.T) {
 	expected := "carto/proj/auth/"
 	if mock.deleted[0] != expected {
 		t.Errorf("expected delete prefix %q, got %q", expected, mock.deleted[0])
+	}
+}
+
+func TestClearModuleFallsBackToIndividualDeletes(t *testing.T) {
+	mock := newMockMemories()
+	mock.failDeleteBySource = true
+	mock.results["carto/proj/auth/layer:atoms"] = []SearchResult{
+		{ID: 10, Source: "carto/proj/auth/layer:atoms"},
+	}
+	mock.results["carto/proj/auth/layer:zones"] = []SearchResult{
+		{ID: 11, Source: "carto/proj/auth/layer:zones"},
+	}
+	s := NewStore(mock, "proj")
+
+	err := s.ClearModule("auth")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.deleted) != 1 || mock.deleted[0] != "carto/proj/auth/" {
+		t.Fatalf("bulk delete prefix not attempted: %v", mock.deleted)
+	}
+	if got := fmt.Sprint(mock.deletedIDs); got != "[10 11]" {
+		t.Fatalf("deleted ids = %s, want [10 11]", got)
+	}
+	if got := fmt.Sprint(mock.deletedLinkIDs); got != "[10 11]" {
+		t.Fatalf("deleted link ids = %s, want [10 11]", got)
 	}
 }
 

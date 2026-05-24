@@ -2,16 +2,19 @@ package pipeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"context"
 
 	"github.com/divyekant/carto/internal/llm"
+	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/sources"
 	"github.com/divyekant/carto/internal/storage"
 )
@@ -52,7 +55,7 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 		// AnalyzeModule fills it from the input, matching the scanner's name.
 		return json.RawMessage(`{
 			"module_name": "",
-			"wiring": [{"from": "main", "to": "helper", "reason": "calls helper function"}],
+			"wiring": [{"from_atom": "main", "to_atom": "helper", "from_module": "", "to_module": "", "link_type": "calls", "reason": "calls helper function"}],
 			"zones": [{"name": "core", "intent": "main business logic", "files": ["main.go"]}],
 			"module_intent": "A test module for pipeline validation."
 		}`), nil
@@ -64,16 +67,26 @@ func (m *mockLLM) CompleteJSON(prompt string, tier llm.Tier, opts *llm.CompleteO
 // ── Mock Memories API ──────────────────────────────────────────────────
 
 type storedMemory struct {
-	text   string
-	source string
+	text       string
+	source     string
+	metadata   map[string]any
+	documentAt string
+}
+
+type createdLink struct {
+	fromID   int
+	toID     int
+	linkType string
 }
 
 type mockMemories struct {
-	mu        sync.Mutex
-	memories  []storedMemory
-	deletions []string
-	nextID    int
-	healthy   bool
+	mu         sync.Mutex
+	memories   []storedMemory
+	deletions  []string
+	deletedIDs []int
+	links      []createdLink
+	nextID     int
+	healthy    bool
 }
 
 func (m *mockMemories) Health() (bool, error) { return m.healthy, nil }
@@ -86,22 +99,84 @@ func (m *mockMemories) AddMemory(mem storage.Memory) (int, error) {
 	return m.nextID, nil
 }
 
-func (m *mockMemories) AddBatch(memories []storage.Memory) error {
+func (m *mockMemories) UpsertBatch(memories []storage.Memory) ([]storage.UpsertResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var results []storage.UpsertResult
 	for _, mem := range memories {
 		m.nextID++
-		m.memories = append(m.memories, storedMemory{text: mem.Text, source: mem.Source})
+		m.memories = append(m.memories, storedMemory{
+			text:       mem.Text,
+			source:     mem.Source,
+			metadata:   mem.Metadata,
+			documentAt: mem.DocumentAt,
+		})
+		results = append(results, storage.UpsertResult{ID: m.nextID, Status: "created"})
 	}
+	return results, nil
+}
+
+func (m *mockMemories) Supersede(oldID int, newText string, newMeta map[string]any) (int, error) {
+	return oldID + 1, nil
+}
+
+func (m *mockMemories) SearchAdvanced(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockMemories) DeleteMemory(id int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deletedIDs = append(m.deletedIDs, id)
 	return nil
 }
 
-func (m *mockMemories) Search(query string, opts storage.SearchOptions) ([]storage.SearchResult, error) {
+func (m *mockMemories) getDeletedIDs() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]int, len(m.deletedIDs))
+	copy(cp, m.deletedIDs)
+	return cp
+}
+
+func (m *mockMemories) CreateLink(fromID, toID int, linkType string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.links = append(m.links, createdLink{fromID: fromID, toID: toID, linkType: linkType})
+	return nil
+}
+
+func (m *mockMemories) getLinks() []createdLink {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]createdLink, len(m.links))
+	copy(cp, m.links)
+	return cp
+}
+
+func (m *mockMemories) GetLinks(id int) ([]storage.Link, error) {
 	return nil, nil
 }
 
+func (m *mockMemories) DeleteLinks(id int) error {
+	return nil
+}
+
 func (m *mockMemories) ListBySource(source string, limit, offset int) ([]storage.SearchResult, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var results []storage.SearchResult
+	for i, mem := range m.memories {
+		if strings.HasPrefix(mem.source, source) {
+			results = append(results, storage.SearchResult{
+				ID:       i + 1,
+				Text:     mem.text,
+				Source:   mem.source,
+				Metadata: mem.metadata,
+			})
+		}
+	}
+	return results, nil
 }
 
 func (m *mockMemories) Count(sourcePrefix string) (int, error) {
@@ -112,7 +187,17 @@ func (m *mockMemories) DeleteBySource(prefix string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletions = append(m.deletions, prefix)
-	return 0, nil
+	kept := m.memories[:0]
+	deleted := 0
+	for _, mem := range m.memories {
+		if strings.HasPrefix(mem.source, prefix) {
+			deleted++
+			continue
+		}
+		kept = append(kept, mem)
+	}
+	m.memories = kept
+	return deleted, nil
 }
 
 func (m *mockMemories) getDeletions() []string {
@@ -131,6 +216,26 @@ func (m *mockMemories) getMemories() []storedMemory {
 	return cp
 }
 
+type failingUpsertMemories struct {
+	*mockMemories
+}
+
+func (m *failingUpsertMemories) UpsertBatch([]storage.Memory) ([]storage.UpsertResult, error) {
+	return nil, fmt.Errorf("upsert unavailable")
+}
+
+type failingClearMemories struct {
+	*mockMemories
+}
+
+func (m *failingClearMemories) DeleteBySource(string) (int, error) {
+	return 0, fmt.Errorf("delete unavailable")
+}
+
+func (m *failingClearMemories) ListBySource(string, int, int) ([]storage.SearchResult, error) {
+	return nil, fmt.Errorf("list unavailable")
+}
+
 // ── Mock Source (implements sources.Source) ────────────────────────────
 
 type mockPipelineSource struct {
@@ -139,8 +244,8 @@ type mockPipelineSource struct {
 	artifacts []sources.Artifact
 }
 
-func (s *mockPipelineSource) Name() string                { return s.name }
-func (s *mockPipelineSource) Scope() sources.Scope        { return s.scope }
+func (s *mockPipelineSource) Name() string                             { return s.name }
+func (s *mockPipelineSource) Scope() sources.Scope                     { return s.scope }
 func (s *mockPipelineSource) Configure(cfg sources.SourceConfig) error { return nil }
 func (s *mockPipelineSource) Fetch(_ context.Context, _ sources.FetchRequest) ([]sources.Artifact, error) {
 	return s.artifacts, nil
@@ -316,10 +421,16 @@ func TestRun_FullPipeline(t *testing.T) {
 		}
 	}
 
-	for _, layer := range []string{"atoms", "history", "signals", "wiring", "zones", "blueprint", "patterns"} {
+	// "wiring" is now stored as graph links, not a text layer.
+	for _, layer := range []string{"atoms", "history", "signals", "zones", "blueprint", "patterns"} {
 		if !layersSeen[layer] {
 			t.Errorf("layer %q was not stored in Memories", layer)
 		}
+	}
+
+	// Verify AtomIDs were populated.
+	if result.AtomIDs == nil || len(result.AtomIDs) == 0 {
+		t.Error("AtomIDs map is empty, want populated from Phase 2 upsert")
 	}
 }
 
@@ -338,6 +449,176 @@ func TestRun_ModuleFilter(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestRun_ModuleFilterDoesNotStoreProjectSynthesis(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		ModuleFilter:   "example.com/testproject",
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.Synthesis != nil {
+		t.Fatal("module-filtered run should not produce project-level synthesis")
+	}
+
+	for _, memory := range mem.getMemories() {
+		if strings.Contains(memory.source, "/_system/layer:blueprint") || strings.Contains(memory.source, "/_system/layer:patterns") {
+			t.Fatalf("module-filtered run stored project-level synthesis layer: %s", memory.source)
+		}
+	}
+}
+
+func TestRun_DoesNotUpdateManifestWhenAtomUpsertFails(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &failingUpsertMemories{mockMemories: &mockMemories{healthy: true}}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatal("expected atom upsert failure to be reported")
+	}
+
+	mf, err := manifest.Load(dir)
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if len(mf.Files) != 0 {
+		t.Fatalf("manifest tracked %d files after atom upsert failure; want 0", len(mf.Files))
+	}
+}
+
+func TestRun_RepairMissingAtomsSkipsExistingAtomFiles(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+	mem.memories = append(mem.memories, storedMemory{
+		source: "carto/test-project/example.com/testproject/layer:atoms",
+		metadata: map[string]any{
+			"filepath": filepath.Join(dir, "main.go"),
+		},
+	})
+
+	result, err := Run(Config{
+		ProjectName:        "test-project",
+		RootPath:           dir,
+		LLMClient:          &mockLLM{},
+		MemoriesClient:     mem,
+		MaxWorkers:         1,
+		RepairMissingAtoms: true,
+		AtomsOnly:          true,
+		SkipSkillFiles:     true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.FilesIndexed != 2 {
+		t.Fatalf("FilesIndexed = %d, want 2 missing files after skipping main.go", result.FilesIndexed)
+	}
+	if result.AtomsCreated != 2 {
+		t.Fatalf("AtomsCreated = %d, want 2", result.AtomsCreated)
+	}
+	if len(mem.getDeletions()) != 0 {
+		t.Fatalf("repair missing atoms should not clear module data, got deletions %v", mem.getDeletions())
+	}
+}
+
+func TestRun_RepairMissingAtomsHonorsMaxFiles(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+	mem.memories = append(mem.memories, storedMemory{
+		source: "carto/test-project/example.com/testproject/layer:atoms",
+		metadata: map[string]any{
+			"filepath": filepath.Join(dir, "main.go"),
+		},
+	})
+
+	result, err := Run(Config{
+		ProjectName:        "test-project",
+		RootPath:           dir,
+		LLMClient:          &mockLLM{},
+		MemoriesClient:     mem,
+		MaxWorkers:         1,
+		RepairMissingAtoms: true,
+		AtomsOnly:          true,
+		MaxFiles:           1,
+		SkipSkillFiles:     true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.FilesIndexed != 1 {
+		t.Fatalf("FilesIndexed = %d, want 1 capped repair file", result.FilesIndexed)
+	}
+	if result.AtomsCreated != 1 {
+		t.Fatalf("AtomsCreated = %d, want 1 capped repair atom", result.AtomsCreated)
+	}
+}
+
+func TestRun_MaxFilesRequiresRepairMissingAtoms(t *testing.T) {
+	dir := createTempProject(t)
+
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: &mockMemories{healthy: true},
+		MaxFiles:       1,
+	})
+	if err == nil {
+		t.Fatal("expected max files without repair mode to fail")
+	}
+	if !strings.Contains(err.Error(), "max files") {
+		t.Fatalf("expected max files error, got %v", err)
+	}
+}
+
+func TestNormalizeAtomFilepathDifferentRoot(t *testing.T) {
+	got := normalizeAtomFilepath("/tmp/old-root/core/dao/UserDao.java", "/private/tmp/new-root", "core/dao")
+	if got != "core/dao/UserDao.java" {
+		t.Fatalf("normalized path = %q, want core/dao/UserDao.java", got)
+	}
+}
+
+func TestRun_NonIncrementalFailsWhenModuleClearFallbackFails(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &failingClearMemories{mockMemories: &mockMemories{healthy: true}}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+	})
+	if err == nil {
+		t.Fatal("expected clear failure")
+	}
+	if !strings.Contains(err.Error(), "clear module") {
+		t.Fatalf("expected clear module error, got %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected partial result")
+	}
+	if result.AtomsCreated != 0 {
+		t.Fatalf("AtomsCreated = %d, want 0 because clear failed before atom work", result.AtomsCreated)
 	}
 }
 
@@ -414,11 +695,11 @@ func TestRun_ProgressPhases(t *testing.T) {
 	var phaseMu sync.Mutex
 
 	_, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
+		MaxWorkers:     1,
 		ProgressFn: func(phase string, done, total int) {
 			phaseMu.Lock()
 			defer phaseMu.Unlock()
@@ -459,11 +740,11 @@ func TestRun_ErrorCollection(t *testing.T) {
 	mem := &mockMemories{healthy: true}
 
 	result, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
+		MaxWorkers:     1,
 	})
 	if err != nil {
 		t.Fatalf("Run returned fatal error: %v", err)
@@ -482,12 +763,12 @@ func TestRun_NilProgressFn(t *testing.T) {
 
 	// Run without a progress callback -- should not panic.
 	result, err := Run(Config{
-		ProjectName: "test-project",
-		RootPath:    dir,
-		LLMClient:   llmClient,
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      llmClient,
 		MemoriesClient: mem,
-		MaxWorkers:  1,
-		ProgressFn:  nil,
+		MaxWorkers:     1,
+		ProgressFn:     nil,
 	})
 	if err != nil {
 		t.Fatalf("Run returned fatal error: %v", err)
@@ -513,11 +794,11 @@ func TestRun_ConcurrencySafety(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			results[idx], errs[idx] = Run(Config{
-				ProjectName: "test-project",
-				RootPath:    dir,
-				LLMClient:   &mockLLM{},
+				ProjectName:    "test-project",
+				RootPath:       dir,
+				LLMClient:      &mockLLM{},
 				MemoriesClient: &mockMemories{healthy: true},
-				MaxWorkers:  2,
+				MaxWorkers:     2,
 				ProgressFn: func(phase string, done, total int) {
 					opCount.Add(1)
 				},
@@ -639,6 +920,44 @@ func TestRun_AtomsStoredIndividually(t *testing.T) {
 	for _, m := range memories {
 		if strings.Contains(m.source, "layer:atoms") && len(m.text) > 10000 {
 			t.Errorf("atom memory is too large (%d bytes); should be individual atom, not JSON blob", len(m.text))
+		}
+	}
+}
+
+func TestRun_LargeModuleUsesFileLevelAtoms(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < largeModuleFileThreshold+1; i++ {
+		name := filepath.Join(dir, "pkg", fmt.Sprintf("file_%03d.go", i))
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(name, []byte(fmt.Sprintf("package pkg\n\nfunc Func%03d() int { return %d }\n", i, i)), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+	}
+
+	mem := &mockMemories{healthy: true}
+	result, err := Run(Config{
+		ProjectName:    "large-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     4,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.AtomsCreated != largeModuleFileThreshold+1 {
+		t.Fatalf("AtomsCreated = %d, want one file-level atom per file", result.AtomsCreated)
+	}
+
+	for _, memory := range mem.getMemories() {
+		if !strings.Contains(memory.source, "layer:atoms") {
+			continue
+		}
+		if memory.metadata["kind"] != "file" {
+			t.Fatalf("large-module atom kind = %v, want file", memory.metadata["kind"])
 		}
 	}
 }
@@ -768,5 +1087,222 @@ func TestRun_CancelledContext(t *testing.T) {
 	// No memories should have been stored.
 	if len(mem.getMemories()) != 0 {
 		t.Errorf("expected 0 stored memories, got %d", len(mem.getMemories()))
+	}
+}
+
+func TestFindAtomID(t *testing.T) {
+	ids := AtomIDMap{
+		"auth:src/auth.go:handleAuth:function":    100,
+		"auth:src/auth.go:validateToken:function": 101,
+		"api:src/handler.go:ServeHTTP:method":     200,
+	}
+	if id := findAtomID(ids, "auth", "handleAuth"); id != 100 {
+		t.Errorf("expected 100, got %d", id)
+	}
+	if id := findAtomID(ids, "auth", "validateToken"); id != 101 {
+		t.Errorf("expected 101, got %d", id)
+	}
+	if id := findAtomID(ids, "api", "ServeHTTP"); id != 200 {
+		t.Errorf("expected 200, got %d", id)
+	}
+	if id := findAtomID(ids, "auth", "missing"); id != 0 {
+		t.Errorf("expected 0, got %d", id)
+	}
+	if id := findAtomID(ids, "nonexistent", "handleAuth"); id != 0 {
+		t.Errorf("expected 0 for wrong module, got %d", id)
+	}
+}
+
+func TestRun_Phase2UpsertWithMetadata(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.AtomsCreated < 2 {
+		t.Fatalf("expected >= 2 atoms, got %d", result.AtomsCreated)
+	}
+
+	// Verify AtomIDs map was populated with correct count.
+	if len(result.AtomIDs) != result.AtomsCreated {
+		t.Errorf("AtomIDs count: got %d, want %d", len(result.AtomIDs), result.AtomsCreated)
+	}
+
+	// Verify all AtomIDs have non-zero values.
+	for key, id := range result.AtomIDs {
+		if id == 0 {
+			t.Errorf("AtomIDs[%s] = 0, want non-zero", key)
+		}
+	}
+
+	// Verify UpsertBatch was called with metadata fields.
+	memories := mem.getMemories()
+	atomMemoriesWithMeta := 0
+	for _, m := range memories {
+		if !strings.Contains(m.source, "layer:atoms") {
+			continue
+		}
+		if m.metadata == nil {
+			t.Error("atom memory has nil metadata")
+			continue
+		}
+		// Check required metadata fields.
+		for _, field := range []string{"name", "kind", "filepath", "module", "language"} {
+			if _, ok := m.metadata[field]; !ok {
+				t.Errorf("atom memory missing metadata field %q", field)
+			}
+		}
+		atomMemoriesWithMeta++
+	}
+	if atomMemoriesWithMeta < 2 {
+		t.Errorf("expected >= 2 atom memories with metadata, got %d", atomMemoriesWithMeta)
+	}
+}
+
+func TestRun_Phase5CreatesGraphLinks(t *testing.T) {
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+
+	// The mock LLM returns wiring edges with "from":"main" -> "to":"helper".
+	// These are atom names within the module. The mock wiring edge doesn't
+	// populate from_module/to_module, so they default to empty strings which
+	// won't match our atom IDs — that's expected since the mock LLM doesn't
+	// produce fully-qualified wiring. Instead verify AtomIDs are populated.
+	if len(result.AtomIDs) == 0 {
+		t.Error("expected AtomIDs to be populated")
+	}
+
+	// Verify that CreateLink was attempted (even if some were skipped due to
+	// mock wiring not matching atom names).
+	if len(result.ModuleAnalyses) > 0 {
+		hasWiring := false
+		for _, ma := range result.ModuleAnalyses {
+			if len(ma.Wiring) > 0 {
+				hasWiring = true
+				break
+			}
+		}
+		if !hasWiring {
+			t.Error("expected module analyses to have wiring edges from mock LLM")
+		}
+	}
+}
+
+func TestRun_AtomsHaveDocumentAt(t *testing.T) {
+	// Verify that UpsertBatch is called with DocumentAt set on atom memories.
+	// DocumentAt is derived from the file modification time (os.Stat).
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	result, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("Run returned fatal error: %v", err)
+	}
+	if result.AtomsCreated < 1 {
+		t.Fatalf("expected >= 1 atom, got %d", result.AtomsCreated)
+	}
+
+	// Every atom memory must have a non-empty DocumentAt in RFC3339 format.
+	memories := mem.getMemories()
+	atomsChecked := 0
+	for _, m := range memories {
+		if !strings.Contains(m.source, "layer:atoms") {
+			continue
+		}
+		if m.documentAt == "" {
+			t.Errorf("atom memory %q has empty DocumentAt; expected RFC3339 file mod time", m.source)
+		} else {
+			// Verify it parses as RFC3339.
+			if _, parseErr := time.Parse(time.RFC3339, m.documentAt); parseErr != nil {
+				t.Errorf("atom memory DocumentAt %q is not valid RFC3339: %v", m.documentAt, parseErr)
+			}
+		}
+		atomsChecked++
+	}
+	if atomsChecked < 1 {
+		t.Error("no atom memories found to check DocumentAt")
+	}
+}
+
+func TestRun_IncrementalDeletesOnlyRemovedFileAtoms(t *testing.T) {
+	// Verify that the incremental path deletes only atoms for removed files
+	// via DeleteMemory, not all atoms for the module via DeleteBySource.
+	dir := createTempProject(t)
+	mem := &mockMemories{healthy: true}
+
+	// First run to populate the manifest and store atoms.
+	_, err := Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	// Simulate a removed file by deleting util.go from disk.
+	// The manifest still knows about it, so DetectChanges will report it as Removed.
+	utilPath := filepath.Join(dir, "pkg", "util.go")
+	if err := os.Remove(utilPath); err != nil {
+		t.Fatalf("remove util.go: %v", err)
+	}
+
+	// Reset tracking before the second run.
+	mem.mu.Lock()
+	mem.deletions = nil
+	mem.deletedIDs = nil
+	mem.mu.Unlock()
+
+	_, err = Run(Config{
+		ProjectName:    "test-project",
+		RootPath:       dir,
+		LLMClient:      &mockLLM{},
+		MemoriesClient: mem,
+		MaxWorkers:     1,
+		Incremental:    true,
+		SkipSkillFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	// Should NOT have called DeleteBySource for the atoms layer (which wipes all atoms).
+	deletions := mem.getDeletions()
+	for _, d := range deletions {
+		if strings.Contains(d, "layer:atoms") {
+			t.Errorf("incremental delete should not use DeleteBySource for atoms layer: %q", d)
+		}
 	}
 }

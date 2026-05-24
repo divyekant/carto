@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/divyekant/carto/internal/config"
+	"github.com/divyekant/carto/internal/indexplan"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/pipeline"
@@ -31,6 +32,10 @@ func indexCmd() *cobra.Command {
 	cmd.Flags().String("project", "", "Project name (defaults to directory name)")
 	cmd.Flags().Bool("all", false, "Re-index all projects")
 	cmd.Flags().Bool("changed", false, "Re-index only modified projects")
+	cmd.Flags().Bool("dry-run", false, "Scan and print an index plan without LLM calls or Memories writes")
+	cmd.Flags().Bool("repair-missing-atoms", false, "Only index files missing atom memories for the selected project/module")
+	cmd.Flags().Bool("atoms-only", false, "Stop after atom extraction/storage")
+	cmd.Flags().Int("max-files", 0, "Maximum files to process in this repair batch (requires --repair-missing-atoms)")
 	return cmd
 }
 
@@ -51,35 +56,53 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
+	full, _ := cmd.Flags().GetBool("full")
+	moduleFilter, _ := cmd.Flags().GetString("module")
+	incremental, _ := cmd.Flags().GetBool("incremental")
+	projectName, _ := cmd.Flags().GetString("project")
+	repairMissingAtoms, _ := cmd.Flags().GetBool("repair-missing-atoms")
+	atomsOnly, _ := cmd.Flags().GetBool("atoms-only")
+	maxFiles, _ := cmd.Flags().GetInt("max-files")
+
+	if projectName == "" {
+		projectName = filepath.Base(absPath)
+	}
+
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if dryRun {
+		return runIndexDryRun(cmd, absPath, projectName, moduleFilter)
+	}
+
+	if maxFiles < 0 {
+		return fmt.Errorf("--max-files must be non-negative")
+	}
+	if maxFiles > 0 && !repairMissingAtoms {
+		return fmt.Errorf("--max-files requires --repair-missing-atoms")
+	}
+
 	cfg := config.Load()
 
-	// Determine API key — LLM_API_KEY takes priority, falls back to ANTHROPIC_API_KEY.
+	// Determine provider API key when the selected provider requires one.
 	apiKey := cfg.LLMApiKey
 	if apiKey == "" {
 		apiKey = cfg.AnthropicKey
 	}
 
-	if apiKey == "" && cfg.LLMProvider != "ollama" {
-		fmt.Fprintf(os.Stderr, "%serror:%s No API key set. Set LLM_API_KEY or ANTHROPIC_API_KEY.\n", red, reset)
+	if apiKey == "" && cfg.RequiresProviderAPIKey() {
+		fmt.Fprintf(os.Stderr, "%serror:%s No API key set for provider %s. Set LLM_API_KEY or ANTHROPIC_API_KEY.\n", red, reset, cfg.LLMProvider)
 		return fmt.Errorf("API key not set")
-	}
-
-	full, _ := cmd.Flags().GetBool("full")
-	moduleFilter, _ := cmd.Flags().GetString("module")
-	incremental, _ := cmd.Flags().GetBool("incremental")
-	projectName, _ := cmd.Flags().GetString("project")
-
-	if projectName == "" {
-		projectName = filepath.Base(absPath)
 	}
 
 	// If --full is set, disable incremental mode.
 	if full {
 		incremental = false
 	}
+	if repairMissingAtoms {
+		incremental = false
+	}
 
-	// Create LLM client.
-	llmClient := llm.NewClient(llm.Options{
+	// Create LLM client using the configured provider.
+	llmClient, llmErr := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
@@ -87,6 +110,9 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,
 	})
+	if llmErr != nil {
+		return fmt.Errorf("create LLM provider %q: %w", cfg.LLMProvider, llmErr)
+	}
 
 	// Create Memories client.
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
@@ -118,19 +144,30 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  mode: incremental\n")
 	} else if full {
 		fmt.Printf("  mode: full\n")
+	} else if repairMissingAtoms {
+		fmt.Printf("  mode: repair missing atoms\n")
+	}
+	if atomsOnly {
+		fmt.Printf("  scope: atoms only\n")
+	}
+	if maxFiles > 0 {
+		fmt.Printf("  max files: %d\n", maxFiles)
 	}
 	fmt.Println()
 
 	result, err := pipeline.Run(pipeline.Config{
-		ProjectName:    projectName,
-		RootPath:       absPath,
-		LLMClient:      llmClient,
-		MemoriesClient: memoriesClient,
-		SourceRegistry: registry,
-		MaxWorkers:     cfg.MaxConcurrent,
-		ProgressFn:     progressFn,
-		Incremental:    incremental,
-		ModuleFilter:   moduleFilter,
+		ProjectName:        projectName,
+		RootPath:           absPath,
+		LLMClient:          llmClient,
+		MemoriesClient:     memoriesClient,
+		SourceRegistry:     registry,
+		MaxWorkers:         cfg.MaxConcurrent,
+		ProgressFn:         progressFn,
+		Incremental:        incremental,
+		ModuleFilter:       moduleFilter,
+		RepairMissingAtoms: repairMissingAtoms,
+		AtomsOnly:          atomsOnly,
+		MaxFiles:           maxFiles,
 	})
 	if err != nil {
 		return fmt.Errorf("pipeline failed: %w", err)
@@ -159,6 +196,43 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runIndexDryRun(cmd *cobra.Command, absPath, projectName, moduleFilter string) error {
+	plan, err := indexplan.Build(absPath, projectName, moduleFilter)
+	if err != nil {
+		return fmt.Errorf("dry-run %w", err)
+	}
+
+	printIndexPlan(cmd, plan)
+	return nil
+}
+
+func printIndexPlan(cmd *cobra.Command, plan indexplan.Plan) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "%s%sIndex plan %s%s\n", bold, gold, plan.Project, reset)
+	fmt.Fprintf(out, "  path:    %s\n", plan.Path)
+	fmt.Fprintf(out, "  modules: %d\n", plan.Modules)
+	fmt.Fprintf(out, "  files:   %d\n", plan.Files)
+	fmt.Fprintf(out, "  bytes:   %d\n", plan.Bytes)
+	fmt.Fprintf(out, "  LLM calls: none\n")
+	fmt.Fprintf(out, "  Memories writes: none\n")
+	if plan.Large {
+		fmt.Fprintf(out, "\n%sLarge codebase:%s full foreground indexing is expected to be slow.\n", amber, reset)
+		for _, rec := range plan.Recommendations {
+			fmt.Fprintf(out, "  - %s\n", rec)
+		}
+	}
+	if len(plan.TopModules) > 0 {
+		fmt.Fprintf(out, "\nTop modules by file count:\n")
+		for _, m := range plan.TopModules {
+			label := m.Name
+			if m.Path != "" {
+				label += " (" + m.Path + ")"
+			}
+			fmt.Fprintf(out, "  - %s: %d files\n", label, m.Files)
+		}
+	}
 }
 
 // runIndexAll lists projects that would be indexed when --all or --changed is used.

@@ -153,7 +153,7 @@ func TestListProjects(t *testing.T) {
 	projADir := filepath.Join(tmpDir, "projA")
 	os.MkdirAll(filepath.Join(projADir, ".carto"), 0o755)
 	mfA := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projA",
 		"indexed_at": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
 		"files": map[string]any{
@@ -168,7 +168,7 @@ func TestListProjects(t *testing.T) {
 	projBDir := filepath.Join(tmpDir, "projB")
 	os.MkdirAll(filepath.Join(projBDir, ".carto"), 0o755)
 	mfB := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "projB",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -265,31 +265,21 @@ func TestQueryEndpoint(t *testing.T) {
 	}
 }
 
-func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
-	// Simulates the real-world issue: search returns results from non-matching
-	// sources (e.g. "claude-code/..."), so the project source prefix filter
-	// drops everything. The handler should fall back to ListBySource.
+func TestQueryEndpoint_SourcePrefixPassedToMemories(t *testing.T) {
+	// Verifies that when a project is specified, the handler passes the
+	// source_prefix to Memories for server-side filtering and returns whatever
+	// Memories returns — no client-side filtering or ListBySource fallback.
+	var capturedBody map[string]any
 	memSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.URL.Path == "/search" && r.Method == http.MethodPost {
-			// Search returns results from non-matching sources.
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			// Memories returns pre-filtered results (server-side).
 			json.NewEncoder(w).Encode(map[string]any{
 				"results": []map[string]any{
-					{"id": 100, "text": "Auth handling", "score": 0.9, "source": "claude-code/myproj"},
-					{"id": 101, "text": "Login flow", "score": 0.8, "source": "learning/myproj"},
-				},
-			})
-			return
-		}
-
-		if r.URL.Path == "/memories" && r.Method == http.MethodGet {
-			// ListBySource returns project memories for the carto source prefix.
-			json.NewEncoder(w).Encode(map[string]any{
-				"memories": []map[string]any{
-					{"id": 50, "text": "Authentication module handles JWT and session tokens", "source": "carto/myproj/auth/layer:atoms"},
-					{"id": 51, "text": "Blueprint: auth + api + storage", "source": "carto/myproj/_system/layer:blueprint"},
-					{"id": 52, "text": "Zones: auth, api, db", "source": "carto/myproj/auth/layer:zones"},
+					{"id": 50, "text": "Authentication module handles JWT", "score": 0.92, "source": "carto/myproj/auth/layer:atoms"},
+					{"id": 51, "text": "Blueprint: auth + api + storage", "score": 0.85, "source": "carto/myproj/_system/layer:blueprint"},
 				},
 			})
 			return
@@ -313,6 +303,11 @@ func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// Verify source_prefix was sent to Memories.
+	if capturedBody["source_prefix"] != "carto/myproj/" {
+		t.Errorf("expected source_prefix 'carto/myproj/' sent to Memories, got %v", capturedBody["source_prefix"])
+	}
+
 	var resp map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -323,18 +318,9 @@ func TestQueryEndpoint_FallbackToListBySource(t *testing.T) {
 		t.Fatalf("expected results array, got %T", resp["results"])
 	}
 
-	// Should have 3 results from the fallback ListBySource.
-	if len(results) != 3 {
-		t.Errorf("expected 3 results from ListBySource fallback, got %d", len(results))
-	}
-
-	// Verify results have correct source prefix.
-	for _, r := range results {
-		item := r.(map[string]any)
-		src := item["source"].(string)
-		if !strings.HasPrefix(src, "carto/myproj/") {
-			t.Errorf("expected source with carto/myproj/ prefix, got %q", src)
-		}
+	// Should return exactly what Memories returned — no client-side filtering.
+	if len(results) != 2 {
+		t.Errorf("expected 2 results from Memories, got %d", len(results))
 	}
 }
 
@@ -364,7 +350,7 @@ func TestGetConfig(t *testing.T) {
 		MemoriesURL:   "http://localhost:8900",
 		MemoriesKey:   "test-memories-key",
 		AnthropicKey:  "sk-ant-api03-very-long-secret-key-value",
-		FastModel:    "claude-haiku-4-5-20251001",
+		FastModel:     "claude-haiku-4-5-20251001",
 		DeepModel:     "claude-opus-4-6",
 		MaxConcurrent: 10,
 		LLMProvider:   "anthropic",
@@ -417,7 +403,7 @@ func TestGetConfig(t *testing.T) {
 func TestPatchConfig(t *testing.T) {
 	cfg := config.Config{
 		MemoriesURL:   "http://localhost:8900",
-		FastModel:    "claude-haiku-4-5-20251001",
+		FastModel:     "claude-haiku-4-5-20251001",
 		MaxConcurrent: 10,
 	}
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
@@ -512,6 +498,100 @@ func TestStartIndex_MissingPath(t *testing.T) {
 	}
 }
 
+func TestIndexRequestDecodesResumableRepairMode(t *testing.T) {
+	var req indexRequest
+	body := strings.NewReader(`{
+		"path": "/repo",
+		"project": "large-repo",
+		"module": "core/dao",
+		"incremental": true,
+		"repair_missing_atoms": true,
+		"atoms_only": true,
+		"max_files": 25
+	}`)
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		t.Fatalf("decode indexRequest: %v", err)
+	}
+	if !req.RepairMissingAtoms {
+		t.Fatal("RepairMissingAtoms = false, want true")
+	}
+	if !req.AtomsOnly {
+		t.Fatal("AtomsOnly = false, want true")
+	}
+	if req.Module != "core/dao" {
+		t.Fatalf("Module = %q, want core/dao", req.Module)
+	}
+	if req.MaxFiles != 25 {
+		t.Fatalf("MaxFiles = %d, want 25", req.MaxFiles)
+	}
+}
+
+func TestStartIndex_MaxFilesRequiresRepairMissingAtoms(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"path": "/tmp/myproject", "project": "myproject", "max_files": 10}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["error"] != "max_files requires repair_missing_atoms" {
+		t.Fatalf("error = %v, want max_files requires repair_missing_atoms", resp["error"])
+	}
+}
+
+func TestIndexPlanScansWithoutStartingRun(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/plan\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"path": "` + dir + `", "project": "plan-project"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index-plan", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["project"] != "plan-project" {
+		t.Fatalf("project = %v, want plan-project", resp["project"])
+	}
+	if resp["modules"].(float64) != 1 {
+		t.Fatalf("modules = %v, want 1", resp["modules"])
+	}
+	if resp["files"].(float64) != 2 {
+		t.Fatalf("files = %v, want 2", resp["files"])
+	}
+	if run := srv.runs.Get("plan-project"); run != nil {
+		t.Fatal("index-plan should not start an index run")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".carto")); !os.IsNotExist(err) {
+		t.Fatalf("index-plan should not create .carto, stat err=%v", err)
+	}
+}
+
 func TestSSE_NoActiveRun(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
 	srv := New(config.Config{}, memoriesClient, "", nil)
@@ -528,6 +608,61 @@ func TestSSE_NoActiveRun(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] == nil || !strings.Contains(resp["error"].(string), "no active index run") {
 		t.Errorf("expected 'no active index run' error, got %v", resp["error"])
+	}
+}
+
+func TestSSE_ActiveRunStreamsThroughMiddleware(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	run := srv.runs.Start("active")
+	if run == nil {
+		t.Fatal("expected active run")
+	}
+	run.SendResult(IndexResult{Modules: 1, Files: 2, Atoms: 3})
+	srv.runs.Finish("active")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/active/progress", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "event: complete") {
+		t.Fatalf("expected complete SSE event, got %q", w.Body.String())
+	}
+}
+
+func TestSSE_LiveRunSendsTerminalEventOnce(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	run := srv.runs.Start("active")
+	if run == nil {
+		t.Fatal("expected active run")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/active/progress", nil)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		srv.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	run.SendResult(IndexResult{Modules: 1, Files: 2, Atoms: 3})
+	srv.runs.Finish("active")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler did not return after terminal event")
+	}
+
+	if got := strings.Count(w.Body.String(), "event: complete"); got != 1 {
+		t.Fatalf("complete event count = %d, want 1; body=%q", got, w.Body.String())
 	}
 }
 
@@ -838,7 +973,7 @@ func TestGetProjectDetail(t *testing.T) {
 
 	// Write a manifest.
 	mf := map[string]any{
-		"version":    "1.0",
+		"version":    "2.0",
 		"project":    "myproj",
 		"indexed_at": time.Now().Format(time.RFC3339),
 		"files": map[string]any{
@@ -903,7 +1038,7 @@ func TestDeleteProject(t *testing.T) {
 	projDir := filepath.Join(tmp, "myproj")
 	cartoDir := filepath.Join(projDir, ".carto")
 	os.MkdirAll(cartoDir, 0o755)
-	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"1.0"}`), 0o644)
+	os.WriteFile(filepath.Join(cartoDir, "manifest.json"), []byte(`{"version":"2.0"}`), 0o644)
 
 	srv := New(config.Config{}, nil, tmp, nil)
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/divyekant/carto/internal/config"
 	"github.com/divyekant/carto/internal/gitclone"
+	"github.com/divyekant/carto/internal/indexplan"
 	"github.com/divyekant/carto/internal/llm"
 	"github.com/divyekant/carto/internal/manifest"
 	"github.com/divyekant/carto/internal/pipeline"
@@ -98,18 +100,28 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 // queryRequest is the JSON body for POST /api/query.
 type queryRequest struct {
-	Text    string `json:"text"`
-	Project string `json:"project"`
-	Tier    string `json:"tier"`
-	K       int    `json:"k"`
+	Text             string  `json:"text"`
+	Project          string  `json:"project"`
+	Tier             string  `json:"tier"`
+	K                int     `json:"k"`
+	ConfidenceWeight float64 `json:"confidence_weight,omitempty"`
+	FeedbackWeight   float64 `json:"feedback_weight,omitempty"`
+	GraphWeight      float64 `json:"graph_weight,omitempty"`
+	Since            string  `json:"since,omitempty"`
+	Until            string  `json:"until,omitempty"`
 }
 
 // queryResultItem is a single result in the query response.
 type queryResultItem struct {
-	Text   string  `json:"text"`
-	Source string  `json:"source"`
-	Score  float64 `json:"score"`
-	Layer  string  `json:"layer,omitempty"`
+	ID           int            `json:"id,omitempty"`
+	Text         string         `json:"text"`
+	Source       string         `json:"source"`
+	Score        float64        `json:"score"`
+	Layer        string         `json:"layer,omitempty"`
+	MatchType    string         `json:"match_type,omitempty"`
+	Confidence   float64        `json:"confidence,omitempty"`
+	GraphSupport float64        `json:"graph_support,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // handleQuery searches the memories index. If a project is specified, it uses
@@ -135,19 +147,22 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search with optional project scoping via source prefix.
-	sourcePrefix := ""
+	// Memories performs server-side source-prefix filtering — no client-side
+	// filtering needed.
 	opts := storage.SearchOptions{
-		K:      req.K,
-		Hybrid: true,
+		K:                req.K,
+		Hybrid:           true,
+		ConfidenceWeight: req.ConfidenceWeight,
+		FeedbackWeight:   req.FeedbackWeight,
+		GraphWeight:      req.GraphWeight,
+		Since:            req.Since,
+		Until:            req.Until,
 	}
 	if req.Project != "" {
-		sourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
-		opts.SourcePrefix = sourcePrefix
-		// Request extra results so we have enough after filtering.
-		opts.K = req.K * 3
+		opts.SourcePrefix = fmt.Sprintf("carto/%s/", req.Project)
 	}
 
-	results, err := s.memoriesClient.Search(req.Text, opts)
+	results, err := s.memoriesClient.SearchAdvanced(req.Text, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -155,36 +170,16 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	var items []queryResultItem
 	for _, sr := range results {
-		if sourcePrefix != "" && !strings.HasPrefix(sr.Source, sourcePrefix) {
-			continue
-		}
 		items = append(items, queryResultItem{
-			Text:   sr.Text,
-			Source: sr.Source,
-			Score:  sr.Score,
+			ID:           sr.ID,
+			Text:         sr.Text,
+			Source:       sr.Source,
+			Score:        sr.Score,
+			MatchType:    sr.MatchType,
+			Confidence:   sr.Confidence,
+			GraphSupport: sr.GraphSupport,
+			Metadata:     sr.Metadata,
 		})
-		if len(items) >= req.K {
-			break
-		}
-	}
-
-	// Fallback: if search returned no project-matching results, use ListBySource
-	// to retrieve all memories for the project. This works around search APIs
-	// that don't support source-prefix filtering.
-	if len(items) == 0 && sourcePrefix != "" {
-		listed, listErr := s.memoriesClient.ListBySource(sourcePrefix, req.K*5, 0)
-		if listErr == nil {
-			for _, sr := range listed {
-				items = append(items, queryResultItem{
-					Text:   sr.Text,
-					Source: sr.Source,
-					Score:  sr.Score,
-				})
-				if len(items) >= req.K {
-					break
-				}
-			}
-		}
 	}
 
 	if items == nil {
@@ -358,12 +353,48 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 
 // indexRequest is the JSON body for POST /api/projects/index.
 type indexRequest struct {
-	Path        string `json:"path"`
-	URL         string `json:"url"`    // Git repo URL (takes precedence over path)
-	Branch      string `json:"branch"` // Optional branch
-	Incremental bool   `json:"incremental"`
-	Module      string `json:"module"`
-	Project     string `json:"project"`
+	Path               string `json:"path"`
+	URL                string `json:"url"`    // Git repo URL (takes precedence over path)
+	Branch             string `json:"branch"` // Optional branch
+	Incremental        bool   `json:"incremental"`
+	Module             string `json:"module"`
+	Project            string `json:"project"`
+	RepairMissingAtoms bool   `json:"repair_missing_atoms"`
+	AtomsOnly          bool   `json:"atoms_only"`
+	MaxFiles           int    `json:"max_files"`
+}
+
+// handleIndexPlan scans a local path and returns the same dry-run scale plan as
+// the CLI. It does not create an LLM client or write to Memories.
+func (s *Server) handleIndexPlan(w http.ResponseWriter, r *http.Request) {
+	var req indexRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	absPath, err := filepath.Abs(req.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	projectName := req.Project
+	if projectName == "" {
+		projectName = filepath.Base(absPath)
+	}
+
+	plan, err := indexplan.Build(absPath, projectName, req.Module)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, plan)
 }
 
 // handleStartIndex launches an asynchronous pipeline.Run for the given path.
@@ -372,6 +403,14 @@ func (s *Server) handleStartIndex(w http.ResponseWriter, r *http.Request) {
 	var req indexRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.MaxFiles < 0 {
+		writeError(w, http.StatusBadRequest, "max_files must be non-negative")
+		return
+	}
+	if req.MaxFiles > 0 && !req.RepairMissingAtoms {
+		writeError(w, http.StatusBadRequest, "max_files requires repair_missing_atoms")
 		return
 	}
 
@@ -446,13 +485,20 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	defer s.runs.Finish(projectName)
 
 	start := time.Now()
+	if req.RepairMissingAtoms {
+		req.Incremental = false
+	}
+	if req.MaxFiles > 0 && !req.RepairMissingAtoms {
+		run.SendError("max_files requires repair_missing_atoms")
+		return
+	}
 
 	apiKey := cfg.LLMApiKey
 	if apiKey == "" {
 		apiKey = cfg.AnthropicKey
 	}
 
-	llmClient := llm.NewClient(llm.Options{
+	llmClient, provErr := llm.NewPipelineClient(cfg.LLMProvider, llm.Options{
 		APIKey:        apiKey,
 		FastModel:     cfg.FastModel,
 		DeepModel:     cfg.DeepModel,
@@ -460,6 +506,11 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		IsOAuth:       config.IsOAuthToken(apiKey),
 		BaseURL:       cfg.LLMBaseURL,
 	})
+	if provErr != nil {
+		run.SendProgress("error", 0, 0)
+		log.Printf("pipeline: failed to create LLM provider %q: %v", cfg.LLMProvider, provErr)
+		return
+	}
 
 	// Build unified source registry from .carto/sources.yaml (if present)
 	// and auto-detected sources (git, GitHub, PDFs).
@@ -482,23 +533,26 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 	memoriesClient := storage.NewMemoriesClient(config.ResolveURL(cfg.MemoriesURL), cfg.MemoriesKey)
 
 	result, err := pipeline.Run(pipeline.Config{
-		Ctx:               run.Ctx,
-		ProjectName:       projectName,
-		RootPath:          absPath,
-		LLMClient:         llmClient,
-		MemoriesClient:    memoriesClient,
-		SourceRegistry:    srcRegistry,
-		MaxWorkers:        cfg.MaxConcurrent,
+		Ctx:            run.Ctx,
+		ProjectName:    projectName,
+		RootPath:       absPath,
+		LLMClient:      llmClient,
+		MemoriesClient: memoriesClient,
+		SourceRegistry: srcRegistry,
+		MaxWorkers:     cfg.MaxConcurrent,
 		ProgressFn: func(phase string, done, total int) {
 			run.SendProgress(phase, done, total)
 		},
 		LogFn: func(level, msg string) {
 			run.SendLog(level, msg)
 		},
-		Incremental:   req.Incremental,
-		ModuleFilter:  req.Module,
-		FastMaxTokens: cfg.FastMaxTokens,
-		DeepMaxTokens: cfg.DeepMaxTokens,
+		Incremental:        req.Incremental,
+		ModuleFilter:       req.Module,
+		FastMaxTokens:      cfg.FastMaxTokens,
+		DeepMaxTokens:      cfg.DeepMaxTokens,
+		RepairMissingAtoms: req.RepairMissingAtoms,
+		AtomsOnly:          req.AtomsOnly,
+		MaxFiles:           req.MaxFiles,
 	})
 	if err != nil {
 		if err == context.Canceled {
@@ -521,7 +575,7 @@ func (s *Server) runIndex(run *IndexRun, projectName, absPath string, req indexR
 		Files:   result.FilesIndexed,
 		Atoms:   result.AtomsCreated,
 		Errors:  len(result.Errors),
-		Elapsed: elapsed,
+		Elapsed: elapsed.Round(time.Millisecond).String(),
 		ErrMsgs: errMsgs,
 	})
 }
@@ -547,11 +601,14 @@ func (s *Server) runIndexFromURL(run *IndexRun, projectName string, req indexReq
 	run.SendLog("info", "Clone complete. Starting pipeline...")
 
 	localReq := indexRequest{
-		Path:        cloneResult.Dir,
-		Incremental: req.Incremental,
-		Module:      req.Module,
-		Project:     projectName,
-		URL:         req.URL,
+		Path:               cloneResult.Dir,
+		Incremental:        req.Incremental,
+		Module:             req.Module,
+		Project:            projectName,
+		URL:                req.URL,
+		RepairMissingAtoms: req.RepairMissingAtoms,
+		AtomsOnly:          req.AtomsOnly,
+		MaxFiles:           req.MaxFiles,
 	}
 	// runIndex handles Finish internally via defer.
 	s.runIndex(run, projectName, cloneResult.Dir, localReq, cfg)
@@ -899,7 +956,7 @@ func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
 		}
 		started++
 		go func(run *IndexRun, name, path string) {
-			sem <- struct{}{} // acquire
+			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 			req := indexRequest{Path: path, Project: name}
 			s.runIndex(run, name, path, req, cfg)
@@ -917,7 +974,7 @@ func (s *Server) handleIndexAll(w http.ResponseWriter, r *http.Request) {
 // sourcesResponse is the JSON shape returned by GET /api/projects/{name}/sources.
 type sourcesResponse struct {
 	Sources     map[string]map[string]string `json:"sources"`
-	Credentials map[string]bool             `json:"credentials"`
+	Credentials map[string]bool              `json:"credentials"`
 }
 
 // handleGetSources returns the parsed .carto/sources.yaml for a project
@@ -969,16 +1026,16 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 // metricsResponse is the JSON shape returned by GET /api/metrics.
 // Fields align with common B2B SaaS observability schemas (Datadog, Prometheus).
 type metricsResponse struct {
-	Version        string  `json:"version"`
-	UptimeSeconds  float64 `json:"uptime_seconds"`
-	GoRoutines     int     `json:"go_routines"`
-	MemAllocMB     float64 `json:"mem_alloc_mb"`
-	MemSysMB       float64 `json:"mem_sys_mb"`
-	GCCycles       uint32  `json:"gc_cycles"`
-	ActiveRuns     int     `json:"active_index_runs"`
-	TotalRequests  int64   `json:"total_requests"`
-	ProjectsDir    string  `json:"projects_dir,omitempty"`
-	AuthEnabled    bool    `json:"auth_enabled"`
+	Version       string  `json:"version"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+	GoRoutines    int     `json:"go_routines"`
+	MemAllocMB    float64 `json:"mem_alloc_mb"`
+	MemSysMB      float64 `json:"mem_sys_mb"`
+	GCCycles      uint32  `json:"gc_cycles"`
+	ActiveRuns    int     `json:"active_index_runs"`
+	TotalRequests int64   `json:"total_requests"`
+	ProjectsDir   string  `json:"projects_dir,omitempty"`
+	AuthEnabled   bool    `json:"auth_enabled"`
 }
 
 // aboutResponse is the JSON shape returned by GET /api/about.
@@ -1031,7 +1088,7 @@ func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
 			"one unified knowledge graph.",
 		Features: []string{
 			"Semantic code search across your entire repository",
-			"LLM-powered module intent extraction (Anthropic, OpenAI, Ollama)",
+			"LLM-powered module intent extraction through Codex, Anthropic, OpenAI, or Ollama",
 			"Layered storage: atoms → modules → blueprints → patterns",
 			"CLAUDE.md and .cursorrules generator for AI assistant context",
 			"GitHub, Jira, Linear, Notion, Slack, PDF source connectors",
