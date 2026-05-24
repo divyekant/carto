@@ -10,10 +10,11 @@ a pull request.
 - **A running [Memories](https://github.com/divyekant/memories) server** -- The storage layer talks to a Memories. You can run one locally at `http://localhost:8900` (the default in
   `internal/config`). Unit tests mock this dependency, but integration tests in
   `internal/pipeline` expect a reachable server.
-- **Anthropic API key** -- Required only for integration tests that exercise the
-  LLM client (`internal/llm`, `internal/analyzer`, `internal/atoms`). Set the
-  `ANTHROPIC_API_KEY` environment variable. Unit tests use mocks and do not require
-  a key.
+- **LLM provider credentials** -- Required only for integration tests that
+  exercise the LLM client (`internal/llm`, `internal/analyzer`, `internal/atoms`).
+  The default provider is `codex` (uses `~/.codex/auth.json` from `codex login`).
+  For Anthropic, set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. Unit tests
+  use mocks and do not require credentials.
 
 ## Getting Started
 
@@ -65,7 +66,8 @@ All application packages live under `internal/`.
 | `internal/chunker` | AST-based code splitting. Uses Tree-sitter grammars to break source files into logical chunks (functions, classes, types). |
 | `internal/config` | Configuration loading from environment variables (Memories URL, API keys, model names, concurrency). |
 | `internal/history` | Git history extraction (Layer 1b). Extracts per-file commit history, authorship, churn scores, and PR references. |
-| `internal/llm` | Multi-provider LLM client. Handles API-key and OAuth authentication, model tiering (Fast/Deep), and structured JSON responses. Supports Anthropic, OpenAI-compatible, and Ollama providers. |
+| `internal/indexplan` | Dry-run index planning. Scans a codebase and produces scale/cost estimates without LLM calls or Memories writes. |
+| `internal/llm` | Multi-provider LLM client. Handles Codex session, API-key, and OAuth authentication, model tiering (Fast/Deep), and structured JSON responses. Supports Codex, Anthropic, OpenAI-compatible, and Ollama providers. |
 | `internal/manifest` | Incremental indexing manifest. Tracks file hashes and timestamps to detect changed, added, and deleted files between runs. |
 | `internal/patterns` | Skill file generation (Layer 5). Produces CLAUDE.md and .cursorrules files from discovered architectural patterns, zones, and blueprints. |
 | `internal/pipeline` | Pipeline orchestrator. Wires together scanning, chunking, atom analysis, history extraction, signal collection, deep analysis, and storage into a single indexing flow. |
