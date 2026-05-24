@@ -67,6 +67,20 @@ const validResponse = `{
 	"exports": ["processData"]
 }`
 
+func validBatchResponse(n int) string {
+	parts := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		parts = append(parts, fmt.Sprintf(`{
+			"index": %d,
+			"clarified_code": "func func%d() {}",
+			"summary": "Summarizes function %d.",
+			"imports": ["fmt"],
+			"exports": ["func%d"]
+		}`, i, i, i, i))
+	}
+	return `{"items":[` + strings.Join(parts, ",") + "]}"
+}
+
 func TestAnalyzeChunk_LanguageField(t *testing.T) {
 	mock := &mockLLM{response: validResponse}
 	analyzer := NewAnalyzer(mock)
@@ -177,7 +191,7 @@ func TestAnalyzeChunk_PromptContainsCode(t *testing.T) {
 }
 
 func TestAnalyzeBatch_Parallel(t *testing.T) {
-	mock := &mockLLM{response: validResponse}
+	mock := &mockLLM{response: validBatchResponse(5)}
 	analyzer := NewAnalyzer(mock)
 
 	chunks := make([]Chunk, 5)
@@ -223,19 +237,20 @@ func TestAnalyzeBatch_Parallel(t *testing.T) {
 		t.Errorf("last total: got %d, want 5", lt)
 	}
 
-	// LLM should have been called 5 times.
+	// LLM should have been called once for the batch.
 	mock.mu.Lock()
 	calls := mock.calls
 	mock.mu.Unlock()
-	if calls != 5 {
-		t.Errorf("LLM calls: got %d, want 5", calls)
+	if calls != 1 {
+		t.Errorf("LLM calls: got %d, want 1", calls)
 	}
 }
 
 func TestAnalyzeBatch_SkipsErrors(t *testing.T) {
-	// Errors on calls 1 and 3 (0-indexed).
+	// First call is the batch attempt. It fails, then individual fallback
+	// errors on chunks 1 and 3 (call indexes 2 and 4).
 	mock := &errorLLM{
-		errorOn:   map[int]bool{1: true, 3: true},
+		errorOn:   map[int]bool{0: true, 2: true, 4: true},
 		validResp: validResponse,
 	}
 	analyzer := NewAnalyzer(mock)

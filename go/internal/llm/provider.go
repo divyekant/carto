@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // Provider abstracts an LLM backend (Anthropic, OpenAI, Ollama, etc.).
@@ -49,29 +48,7 @@ func (a *ProviderAdapter) CompleteJSON(prompt string, tier Tier, copts *Complete
 		return nil, err
 	}
 
-	// Extract the first JSON object from the response text.
-	cleaned := stripMarkdownFences(text)
-	start := strings.Index(cleaned, "{")
-	if start == -1 {
-		return nil, fmt.Errorf("llm: no JSON object found in provider response")
-	}
-	// Find matching closing brace.
-	depth := 0
-	for i := start; i < len(cleaned); i++ {
-		if cleaned[i] == '{' {
-			depth++
-		} else if cleaned[i] == '}' {
-			depth--
-			if depth == 0 {
-				raw := json.RawMessage(cleaned[start : i+1])
-				if json.Valid(raw) {
-					return raw, nil
-				}
-				return nil, fmt.Errorf("llm: extracted JSON is invalid")
-			}
-		}
-	}
-	return nil, fmt.Errorf("llm: unclosed JSON object in provider response")
+	return extractJSONObject(text)
 }
 
 // NewPipelineClient creates an LLM client suitable for the pipeline based on
@@ -114,7 +91,9 @@ func NewProvider(name string, opts Options) (Provider, error) {
 			baseURL = "http://localhost:11434"
 		}
 		return NewOllamaProvider(baseURL, opts.FastModel, opts.DeepModel), nil
+	case "codex":
+		return NewCodexProvider(opts.BaseURL, opts.FastModel, opts.DeepModel), nil
 	default:
-		return nil, fmt.Errorf("llm: unknown provider %q (supported: anthropic, openai, openrouter, ollama)", name)
+		return nil, fmt.Errorf("llm: unknown provider %q (supported: anthropic, openai, openrouter, ollama, codex)", name)
 	}
 }

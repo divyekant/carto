@@ -66,13 +66,20 @@ type MemoriesClient struct {
 	http    http.Client
 }
 
+const (
+	memoriesHTTPTimeout       = 5 * time.Minute
+	memoriesMaxBatchAttempts  = 4
+	memoriesBaseRetryDelay    = 500 * time.Millisecond
+	memoriesMaximumRetryDelay = 10 * time.Second
+)
+
 // NewMemoriesClient creates a client for the given base URL and API key.
 func NewMemoriesClient(baseURL, apiKey string) *MemoriesClient {
 	return &MemoriesClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		http: http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: memoriesHTTPTimeout,
 		},
 	}
 }
@@ -157,29 +164,95 @@ func (c *MemoriesClient) UpsertBatch(memories []Memory) ([]UpsertResult, error) 
 			Memories []Memory `json:"memories"`
 		}{Memories: batch}
 
-		resp, err := c.request(http.MethodPost, "/memory/upsert-batch", payload)
+		result, err := c.upsertBatchWithRetry(batchNum, payload)
 		if err != nil {
-			return all, fmt.Errorf("batch %d: %w", batchNum, err)
+			return all, err
 		}
-
-		if resp.StatusCode != http.StatusOK {
-			text, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			return all, fmt.Errorf("batch %d: memories API error %d: %s", batchNum, resp.StatusCode, text)
-		}
-
-		var result struct {
-			Results []UpsertResult `json:"results"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
-			return all, fmt.Errorf("batch %d: decode response: %w", batchNum, err)
-		}
-		resp.Body.Close()
 
 		all = append(all, result.Results...)
 	}
 	return all, nil
+}
+
+func (c *MemoriesClient) upsertBatchWithRetry(batchNum int, payload any) (struct {
+	Results []UpsertResult `json:"results"`
+}, error) {
+	var result struct {
+		Results []UpsertResult `json:"results"`
+	}
+
+	for attempt := 0; attempt < memoriesMaxBatchAttempts; attempt++ {
+		resp, err := c.request(http.MethodPost, "/memory/upsert-batch", payload)
+		if err != nil {
+			if attempt < memoriesMaxBatchAttempts-1 {
+				sleepMemoriesRetry(attempt, 0)
+				continue
+			}
+			return result, fmt.Errorf("batch %d: %w", batchNum, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			text, _ := io.ReadAll(resp.Body)
+			retryAfter, _ := parseMemoriesRetryAfter(resp.Header.Get("Retry-After"))
+			status := resp.StatusCode
+			resp.Body.Close()
+			if isRetryableMemoriesStatus(status) && attempt < memoriesMaxBatchAttempts-1 {
+				sleepMemoriesRetry(attempt, retryAfter)
+				continue
+			}
+			return result, fmt.Errorf("batch %d: memories API error %d: %s", batchNum, status, text)
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			if attempt < memoriesMaxBatchAttempts-1 {
+				sleepMemoriesRetry(attempt, 0)
+				continue
+			}
+			return result, fmt.Errorf("batch %d: decode response: %w", batchNum, err)
+		}
+		resp.Body.Close()
+		return result, nil
+	}
+
+	return result, fmt.Errorf("batch %d: retry attempts exhausted", batchNum)
+}
+
+func isRetryableMemoriesStatus(status int) bool {
+	return status == http.StatusRequestTimeout ||
+		status == http.StatusConflict ||
+		status == http.StatusTooManyRequests ||
+		status >= http.StatusInternalServerError
+}
+
+func sleepMemoriesRetry(attempt int, retryAfter time.Duration) {
+	delay := retryAfter
+	if delay <= 0 {
+		delay = memoriesBaseRetryDelay << attempt
+		if delay > memoriesMaximumRetryDelay {
+			delay = memoriesMaximumRetryDelay
+		}
+	}
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+}
+
+func parseMemoriesRetryAfter(value string) (time.Duration, bool) {
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		return time.Duration(seconds) * time.Second, true
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		delay := time.Until(when)
+		if delay < 0 {
+			return 0, true
+		}
+		return delay, true
+	}
+	return 0, false
 }
 
 // Supersede replaces an existing memory with new content, preserving lineage.
@@ -400,24 +473,50 @@ func (c *MemoriesClient) DeleteBySource(prefix string) (int, error) {
 		SourcePrefix string `json:"source_prefix"`
 	}{SourcePrefix: prefix}
 
-	resp, err := c.request(http.MethodPost, "/memory/delete-by-prefix", payload)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for attempt := 0; attempt < memoriesMaxBatchAttempts; attempt++ {
+		resp, err := c.request(http.MethodPost, "/memory/delete-by-prefix", payload)
+		if err != nil {
+			lastErr = err
+			sleepMemoriesRetry(attempt, 0)
+			continue
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		text, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
-	}
+		var retryAfter time.Duration
+		if ra, ok := parseMemoriesRetryAfter(resp.Header.Get("Retry-After")); ok {
+			retryAfter = ra
+		}
 
-	var result struct {
-		Count int `json:"count"`
+		if resp.StatusCode != http.StatusOK {
+			text, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("memories API error %d: %s", resp.StatusCode, text)
+			if !isRetryableMemoriesStatus(resp.StatusCode) || attempt == memoriesMaxBatchAttempts-1 {
+				break
+			}
+			sleepMemoriesRetry(attempt, retryAfter)
+			continue
+		}
+
+		var result struct {
+			Count int `json:"count"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("decode response: %w", err)
+			if attempt == memoriesMaxBatchAttempts-1 {
+				break
+			}
+			sleepMemoriesRetry(attempt, 0)
+			continue
+		}
+		resp.Body.Close()
+		return result.Count, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("decode response: %w", err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("delete-by-source failed")
 	}
-	return result.Count, nil
+	return 0, lastErr
 }
 
 // Count returns the number of memories matching a source prefix.

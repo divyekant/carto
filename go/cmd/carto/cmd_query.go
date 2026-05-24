@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -42,30 +43,52 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	cfg := config.Load()
 	memoriesClient := storage.NewMemoriesClient(cfg.MemoriesURL, cfg.MemoriesKey)
 
-	// If a project is provided, try tier-based retrieval.
+	// If a project is provided, run semantic search scoped to that project's
+	// Carto source prefix. The tier narrows preferred layers but falls back to
+	// any project result when those layers are partial or missing.
 	if project != "" {
-		store := storage.NewStore(memoriesClient, project)
-
 		storageTier := storage.Tier(tier)
-		results, err := store.RetrieveByTier(query, storageTier)
+		allowedLayers, err := queryLayersForTier(storageTier)
 		if err != nil {
-			return fmt.Errorf("retrieve by tier: %w", err)
+			return err
 		}
 
-		writeEnvelopeHuman(cmd, results, nil, func() {
+		searchK := count * 3
+		if searchK < count {
+			searchK = count
+		}
+		results, err := memoriesClient.SearchAdvanced(query, storage.SearchOptions{
+			K:                searchK,
+			Hybrid:           true,
+			SourcePrefix:     fmt.Sprintf("carto/%s/", project),
+			GraphWeight:      graphWeight,
+			ConfidenceWeight: confidenceWeight,
+			FeedbackWeight:   feedbackWeight,
+			Since:            since,
+			Until:            until,
+		})
+		if err != nil {
+			return fmt.Errorf("search project: %w", err)
+		}
+		filtered := filterQueryResultsByLayer(results, allowedLayers)
+		if len(filtered) == 0 {
+			filtered = results
+		}
+		if len(filtered) > count {
+			filtered = filtered[:count]
+		}
+
+		writeEnvelopeHuman(cmd, filtered, nil, func() {
 			fmt.Printf("%s%sResults for project %q (tier: %s)%s\n\n", bold, gold, project, tier, reset)
 
-			for layer, entries := range results {
-				if len(entries) == 0 {
-					continue
-				}
-				fmt.Printf("%s%s[%s]%s\n", bold, gold, layer, reset)
-				for _, entry := range entries {
-					snippet := truncateText(entry.Text, 200)
-					fmt.Printf("  %ssource:%s %s\n", gold, reset, entry.Source)
-					fmt.Printf("  %sscore:%s  %.4f\n", gold, reset, entry.Score)
-					fmt.Printf("  %s\n\n", snippet)
-				}
+			if len(filtered) == 0 {
+				fmt.Println("  No results found.")
+				return
+			}
+			for i, entry := range filtered {
+				snippet := truncateText(entry.Text, 200)
+				fmt.Printf("%s%d.%s %ssource:%s %s  %sscore:%s %.4f\n", bold, i+1, reset, gold, reset, entry.Source, gold, reset, entry.Score)
+				fmt.Printf("   %s\n\n", snippet)
 			}
 		})
 		return nil
@@ -105,4 +128,54 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	})
 
 	return nil
+}
+
+func queryLayersForTier(tier storage.Tier) (map[string]bool, error) {
+	switch tier {
+	case storage.TierMini:
+		return map[string]bool{
+			storage.LayerZones:     true,
+			storage.LayerBlueprint: true,
+			storage.LayerPatterns:  true,
+		}, nil
+	case storage.TierStandard:
+		return map[string]bool{
+			storage.LayerZones:     true,
+			storage.LayerBlueprint: true,
+			storage.LayerPatterns:  true,
+			storage.LayerAtoms:     true,
+			storage.LayerWiring:    true,
+		}, nil
+	case storage.TierFull:
+		return map[string]bool{
+			storage.LayerZones:     true,
+			storage.LayerBlueprint: true,
+			storage.LayerPatterns:  true,
+			storage.LayerAtoms:     true,
+			storage.LayerWiring:    true,
+			storage.LayerHistory:   true,
+			storage.LayerSignals:   true,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown tier: %s", tier)
+	}
+}
+
+func filterQueryResultsByLayer(results []storage.SearchResult, allowed map[string]bool) []storage.SearchResult {
+	filtered := make([]storage.SearchResult, 0, len(results))
+	for _, r := range results {
+		layer := layerFromSource(r.Source)
+		if allowed[layer] {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+func layerFromSource(source string) string {
+	idx := strings.LastIndex(source, "/layer:")
+	if idx == -1 {
+		return ""
+	}
+	return source[idx+len("/layer:"):]
 }

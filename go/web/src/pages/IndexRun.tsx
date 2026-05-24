@@ -34,6 +34,23 @@ interface LogEntry {
   timestamp: number
 }
 
+interface IndexPlanModule {
+  name: string
+  path?: string
+  files: number
+}
+
+interface IndexPlan {
+  project: string
+  path: string
+  modules: number
+  files: number
+  bytes: number
+  large: boolean
+  recommendations?: string[]
+  top_modules: IndexPlanModule[]
+}
+
 export default function IndexRun() {
   const [searchParams] = useSearchParams()
   const [state, setState] = useState<PageState>('idle')
@@ -44,10 +61,15 @@ export default function IndexRun() {
   const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [module, setModule] = useState('')
   const [incremental, setIncremental] = useState(false)
+  const [repairMissingAtoms, setRepairMissingAtoms] = useState(false)
+  const [atomsOnly, setAtomsOnly] = useState(false)
+  const [maxFiles, setMaxFiles] = useState('')
   const [projectName, setProjectName] = useState('')
   const [stopping, setStopping] = useState(false)
   const [progress, setProgress] = useState<ProgressData>({ phase: '', done: 0, total: 0 })
   const [result, setResult] = useState<CompleteData | null>(null)
+  const [plan, setPlan] = useState<IndexPlan | null>(null)
+  const [planning, setPlanning] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -111,10 +133,59 @@ export default function IndexRun() {
     setPageState('idle')
     setProgress({ phase: '', done: 0, total: 0 })
     setResult(null)
+    setPlan(null)
     setErrorMsg('')
     setLogs([])
     setStopping(false)
     setProjectName('')
+  }
+
+  function repairBatchMaxFiles() {
+    const parsed = Number(maxFiles)
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0
+    return Math.floor(parsed)
+  }
+
+  function formatBytes(value: number) {
+    if (!Number.isFinite(value) || value <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB']
+    let size = value
+    let unit = 0
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024
+      unit += 1
+    }
+    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+  }
+
+  async function planIndexing() {
+    if (inputMode !== 'local' || !path.trim()) return
+    setPlanning(true)
+    setErrorMsg('')
+
+    try {
+      const body: Record<string, unknown> = { path: path.trim() }
+      if (module.trim()) body.module = module.trim()
+
+      const res = await fetch('/api/projects/index-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(data.error || `HTTP ${res.status}`)
+      }
+
+      const data: IndexPlan = await res.json()
+      setPlan(data)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err))
+      setPageState('error')
+    } finally {
+      setPlanning(false)
+    }
   }
 
   async function startIndexing() {
@@ -123,10 +194,17 @@ export default function IndexRun() {
     setPageState('starting')
     setErrorMsg('')
     setResult(null)
+    setPlan(null)
     setLogs([])
 
     try {
-      const body: Record<string, unknown> = { incremental }
+      const body: Record<string, unknown> = {
+        incremental: repairMissingAtoms ? false : incremental,
+        repair_missing_atoms: repairMissingAtoms,
+        atoms_only: atomsOnly,
+      }
+      const maxFilesValue = repairBatchMaxFiles()
+      if (repairMissingAtoms && maxFilesValue > 0) body.max_files = maxFilesValue
       if (inputMode === 'local') {
         body.path = path.trim()
       } else {
@@ -291,14 +369,107 @@ export default function IndexRun() {
               </div>
 
               <div className="flex items-center gap-2 pb-1">
-                <Switch checked={incremental} onCheckedChange={setIncremental} id="incremental" />
+                <Switch
+                  checked={incremental}
+                  onCheckedChange={setIncremental}
+                  id="incremental"
+                  disabled={repairMissingAtoms}
+                />
                 <Label htmlFor="incremental" className="text-sm font-medium">Incremental</Label>
+              </div>
+
+              <div className="flex items-center gap-2 pb-1">
+                <Switch checked={repairMissingAtoms} onCheckedChange={setRepairMissingAtoms} id="repair-missing-atoms" />
+                <Label htmlFor="repair-missing-atoms" className="text-sm font-medium">Repair Missing Atoms</Label>
+              </div>
+
+              <div className="flex items-center gap-2 pb-1">
+                <Switch checked={atomsOnly} onCheckedChange={setAtomsOnly} id="atoms-only" />
+                <Label htmlFor="atoms-only" className="text-sm font-medium">Atoms Only</Label>
+              </div>
+
+              <div className="w-28">
+                <Label htmlFor="max-files" className="text-sm font-medium mb-1 block">Max Files</Label>
+                <Input
+                  id="max-files"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder="0"
+                  value={maxFiles}
+                  onChange={(e) => setMaxFiles(e.target.value)}
+                  disabled={!repairMissingAtoms}
+                />
               </div>
 
               <Button size="sm" onClick={startIndexing} disabled={inputMode === 'local' ? !path.trim() : !gitUrl.trim()}>
                 Start
               </Button>
+              {inputMode === 'local' && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={planIndexing}
+                  disabled={!path.trim() || planning}
+                >
+                  {planning ? 'Planning...' : 'Plan'}
+                </Button>
+              )}
             </div>
+          </div>
+        </Section>
+      )}
+
+      {state === 'idle' && plan && (
+        <Section title="Index Plan" className="mt-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Badge variant={plan.large ? 'secondary' : 'default'} className="text-xs">
+                {plan.large ? 'Large' : 'Ready'}
+              </Badge>
+              <span className="text-xs text-muted-foreground truncate" title={plan.path}>{plan.project}</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Modules</span>
+                <p className="font-medium">{plan.modules}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Files</span>
+                <p className="font-medium">{plan.files}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Size</span>
+                <p className="font-medium">{formatBytes(plan.bytes)}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Writes</span>
+                <p className="font-medium">None</p>
+              </div>
+            </div>
+            {plan.large && plan.recommendations && (
+              <div className="rounded-md border border-border/40 p-3">
+                <div className="space-y-1 text-xs">
+                  {plan.recommendations.map((rec) => (
+                    <div key={rec} className="text-muted-foreground">{rec}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {plan.top_modules.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">Top Modules</div>
+                <div className="grid gap-1 text-xs">
+                  {plan.top_modules.slice(0, 6).map((mod) => (
+                    <div key={`${mod.name}:${mod.path ?? ''}`} className="flex items-center justify-between gap-3">
+                      <span className="truncate" title={mod.path ? `${mod.name} (${mod.path})` : mod.name}>{mod.name}</span>
+                      <span className="text-muted-foreground shrink-0">{mod.files} files</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Section>
       )}

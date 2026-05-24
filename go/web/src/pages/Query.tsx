@@ -123,17 +123,27 @@ export default function Query() {
           </div>
 
           <div className="w-40">
-            <Label className="text-sm font-medium mb-1 block">Project</Label>
-            <Select value={project} onValueChange={setProject}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="project" className="text-sm font-medium mb-1 block">Project</Label>
+            {projects.length > 0 ? (
+              <Select value={project} onValueChange={setProject}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="project"
+                placeholder="Project name"
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+            )}
           </div>
 
           <div>

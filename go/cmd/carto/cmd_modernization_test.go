@@ -12,6 +12,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -49,7 +51,7 @@ func withCleanEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY", "LLM_API_KEY", "LLM_PROVIDER",
 		"MEMORIES_URL", "CARTO_SERVER_TOKEN", "CARTO_CORS_ORIGINS",
 		"CARTO_FAST_MAX_TOKENS", "CARTO_DEEP_MAX_TOKENS",
-		"CARTO_PROFILE", "CARTO_AUDIT_LOG", "PROJECTS_DIR",
+		"CARTO_PROFILE", "CARTO_AUDIT_LOG", "PROJECTS_DIR", "CODEX_HOME",
 	}
 	saved := map[string]string{}
 	for _, k := range keys {
@@ -169,6 +171,23 @@ func TestAuthStatus_WithAnthropicKey_ShowsMasked(t *testing.T) {
 	}
 }
 
+func TestAuthStatus_CodexProvider_DoesNotAskForAPIKey(t *testing.T) {
+	withCleanEnv(t)
+	t.Setenv("LLM_PROVIDER", "codex")
+
+	cmd := authCmd()
+	out, err := execCmd(t, cmd, []string{"status"})
+	if err != nil {
+		t.Fatalf("auth status failed: %v", err)
+	}
+	if strings.Contains(out, "No effective LLM API key found") {
+		t.Fatalf("codex auth status should not ask for provider API keys:\n%s", out)
+	}
+	if !strings.Contains(out, "Codex") {
+		t.Fatalf("expected codex-specific status guidance, got:\n%s", out)
+	}
+}
+
 func TestAuthStatus_JSONOutput(t *testing.T) {
 	withCleanEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-testkey1234567890abc")
@@ -206,6 +225,48 @@ func TestAuthStatus_JSONOutput(t *testing.T) {
 		if c.Masked == rawKey {
 			t.Errorf("credential %q must be masked, got raw value", c.Name)
 		}
+	}
+}
+
+func TestQuery_ProjectUsesScopedSearch(t *testing.T) {
+	withCleanEnv(t)
+
+	var got struct {
+		Query        string `json:"query"`
+		SourcePrefix string `json:"source_prefix"`
+		Hybrid       bool   `json:"hybrid"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[{"id":1,"text":"Codex mode uses local session auth and no provider API key.","source":"carto/demo/_system/layer:blueprint","score":0.9}]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MEMORIES_URL", srv.URL)
+	t.Setenv("MEMORIES_API_KEY", "test-key")
+
+	cmd := testRoot(queryCmd())
+	out, err := execCmd(t, cmd, []string{"query", "codex api key", "--project", "demo", "--json"})
+	if err != nil {
+		t.Fatalf("query failed: %v\n%s", err, out)
+	}
+	if got.Query != "codex api key" {
+		t.Fatalf("query = %q, want original question", got.Query)
+	}
+	if got.SourcePrefix != "carto/demo/" {
+		t.Fatalf("source_prefix = %q, want carto/demo/", got.SourcePrefix)
+	}
+	if !got.Hybrid {
+		t.Fatalf("expected project query to use hybrid search")
+	}
+	if !strings.Contains(out, "Codex mode uses local session auth") {
+		t.Fatalf("expected scoped search result in output, got:\n%s", out)
 	}
 }
 
@@ -481,7 +542,7 @@ func TestConfigSet_DeepMaxTokens_PersistsToFile(t *testing.T) {
 
 func TestConfigSet_LLMProvider_Valid(t *testing.T) {
 	withCleanEnv(t)
-	for _, provider := range []string{"anthropic", "openai", "ollama"} {
+	for _, provider := range []string{"anthropic", "openai", "ollama", "codex"} {
 		cmd := configCmdGroup()
 		_, err := execCmd(t, cmd, []string{"set", "llm_provider", provider})
 		if err != nil {
@@ -505,7 +566,8 @@ func TestConfigSet_MemoriesURL_Valid(t *testing.T) {
 
 func TestConfigValidate_MissingAPIKey_Errors(t *testing.T) {
 	withCleanEnv(t)
-	// No API key, no provider override — should fail validation.
+	t.Setenv("LLM_PROVIDER", "anthropic")
+	// Anthropic still requires a provider API key.
 	cmd := configCmdGroup()
 	_, err := execCmd(t, cmd, []string{"validate"})
 	if err == nil {
@@ -515,6 +577,7 @@ func TestConfigValidate_MissingAPIKey_Errors(t *testing.T) {
 
 func TestConfigValidate_WithAnthropicKey_Passes(t *testing.T) {
 	withCleanEnv(t)
+	t.Setenv("LLM_PROVIDER", "anthropic")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-testvalidatekeyabcdef12345")
 	t.Setenv("MEMORIES_URL", "http://localhost:8900")
 
@@ -567,6 +630,25 @@ func TestDoctor_SkipNetwork_WithAnthropicKey_Passes(t *testing.T) {
 		// are optional (audit log, server token) — count failures:
 		// failures from those are warnings, not errors; errors are hard fails.
 		// If doctor returns an error here something is mis-configured.
+	}
+}
+
+func TestDoctor_SkipNetwork_CodexSession_PassesWithoutAPIKey(t *testing.T) {
+	withCleanEnv(t)
+	t.Setenv("LLM_PROVIDER", "codex")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("PROJECTS_DIR", t.TempDir())
+	if err := os.WriteFile(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"access","refresh_token":"refresh","account_id":"account"}}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	cmd := doctorCmd()
+	out, err := execCmd(t, cmd, []string{"--skip-network"})
+	if err != nil {
+		t.Fatalf("doctor should pass with codex auth and no provider API key: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Codex Session") {
+		t.Fatalf("expected Codex Session check, got:\n%s", out)
 	}
 }
 

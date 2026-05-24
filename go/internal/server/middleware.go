@@ -175,6 +175,12 @@ func (l *loggingResponseWriter) Write(b []byte) (int, error) {
 	return l.ResponseWriter.Write(b)
 }
 
+func (l *loggingResponseWriter) Flush() {
+	if flusher, ok := l.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // loggingMiddleware emits a structured JSON log line for every HTTP request,
 // including method, path, response status code, latency in milliseconds, and
 // the X-Request-ID for log correlation. Compatible with Datadog, CloudWatch,

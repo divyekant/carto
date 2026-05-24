@@ -69,8 +69,8 @@ func runWriteback(cmd *cobra.Command, args []string) error {
 	if apiKey == "" {
 		apiKey = cfg.AnthropicKey
 	}
-	if apiKey == "" && cfg.LLMProvider != "ollama" {
-		printError("No API key set. Set LLM_API_KEY or ANTHROPIC_API_KEY.")
+	if apiKey == "" && cfg.RequiresProviderAPIKey() {
+		printError("No API key set for provider %s. Set LLM_API_KEY or ANTHROPIC_API_KEY.", cfg.LLMProvider)
 		return fmt.Errorf("API key not set")
 	}
 

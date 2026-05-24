@@ -1,5 +1,7 @@
 # Carto Architecture
 
+Visual companion: [System Architecture Visual](system-architecture-visual.html)
+
 ## 1. System Overview
 
 Carto is an intent-aware codebase intelligence tool. It scans a codebase
@@ -11,9 +13,11 @@ summaries to system-wide architectural blueprints.
 
 Carto is written in pure Go (module `github.com/divyekant/carto`). The only
 CGO dependency is Tree-sitter, which embeds C parsers for AST-based code
-chunking. The system communicates with two external services over HTTP: the
-Anthropic Messages API for LLM inference and a [Memories](https://github.com/divyekant/memories) server for
-vector storage and retrieval.
+chunking. The system communicates with two external services over HTTP: a
+configured LLM execution backend and a [Memories](https://github.com/divyekant/memories) server for
+vector storage and retrieval. The default LLM backend is the user's local Codex
+ChatGPT session, read from `~/.codex/auth.json`, so normal local operation does
+not require separate provider API keys.
 
 ### Core Capabilities
 
@@ -463,6 +467,10 @@ When `--incremental` is enabled:
    - **Modified**: files whose SHA-256 hash differs from the manifest entry
    - **Removed**: files in the manifest but no longer on disk
 
+The manifest is updated only for modules whose atom extraction and atom storage
+completed. This prevents partial Memories writes from being treated as a clean
+incremental baseline during later retries.
+
 3. **Process changes**:
    - Only `Added` and `Modified` files are sent through Phase 2-4
    - `Removed` files trigger `Store.ClearModule()` to delete their entries
@@ -560,18 +568,21 @@ an acceptable tradeoff because:
   chunks
 - CGO is isolated to a single package (`internal/chunker`)
 
-### HTTP-Based LLM Client (Not SDK)
+### HTTP-Based LLM Clients (Not SDKs)
 
-The `llm.Client` communicates with the Anthropic API via raw HTTP requests
-rather than using an SDK. This provides:
-- Full control over OAuth token refresh flow (double-checked locking pattern)
-- Custom header management (OAuth beta headers, User-Agent)
+The LLM package communicates with providers via raw HTTP requests rather than
+provider SDKs. This provides:
+- Full control over Codex session and Anthropic OAuth token refresh flows
+- Custom header management (Codex account headers, OAuth beta headers, User-Agent)
 - Direct control over the request/response JSON schema
 - No dependency on SDK release cycles
-- Support for both API key and OAuth authentication modes
+- Support for Codex session auth, provider API keys, and Anthropic OAuth
 
-The client supports the `sk-ant-oat01-` prefix detection for automatic OAuth
-mode switching.
+`llm.CodexProvider` reads ChatGPT-backed Codex auth from `CODEX_HOME/auth.json`
+or `~/.codex/auth.json`, refreshes expired tokens when possible, streams
+Responses API output, and retries transient 429/HTTP2 stream failures with
+backoff. The Anthropic client still supports `sk-ant-oat01-` prefix detection
+for automatic OAuth mode switching.
 
 ### Memories as External Service
 
@@ -619,7 +630,8 @@ Every phase operates on a per-module basis:
 
 This enables:
 - Natural parallelism (modules are independent work units)
-- Targeted re-indexing (`--module` flag)
+- Targeted re-indexing (`--module` flag) that refreshes module layers without
+  replacing project-wide blueprint/pattern layers
 - Module-scoped retrieval queries
 - Incremental indexing at the module granularity
 

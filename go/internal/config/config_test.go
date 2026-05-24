@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,8 +23,14 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.MemoriesURL != "http://localhost:8900" {
 		t.Errorf("expected default Memories URL, got %s", cfg.MemoriesURL)
 	}
-	if cfg.FastModel != "claude-haiku-4-5-20251001" {
+	if cfg.LLMProvider != "codex" {
+		t.Errorf("expected default LLM provider codex, got %s", cfg.LLMProvider)
+	}
+	if cfg.FastModel != "gpt-5.4-mini" {
 		t.Errorf("expected default fast model, got %s", cfg.FastModel)
+	}
+	if cfg.DeepModel != "gpt-5.5" {
+		t.Errorf("expected default deep model, got %s", cfg.DeepModel)
 	}
 	if cfg.MaxConcurrent != 10 {
 		t.Errorf("expected default concurrency 10, got %d", cfg.MaxConcurrent)
@@ -65,6 +72,52 @@ func TestLoadConfig_TokenLimitEnvOverrides(t *testing.T) {
 	}
 	if cfg.DeepMaxTokens != 16384 {
 		t.Errorf("expected DeepMaxTokens 16384, got %d", cfg.DeepMaxTokens)
+	}
+}
+
+func TestLoadConfig_CodexProviderDefaultsToCodexModels(t *testing.T) {
+	t.Setenv("LLM_PROVIDER", "codex")
+	t.Setenv("CARTO_FAST_MODEL", "")
+	t.Setenv("CARTO_DEEP_MODEL", "")
+
+	cfg := Load()
+	if cfg.FastModel != "gpt-5.4-mini" {
+		t.Errorf("expected Codex fast model default, got %q", cfg.FastModel)
+	}
+	if cfg.DeepModel != "gpt-5.5" {
+		t.Errorf("expected Codex deep model default, got %q", cfg.DeepModel)
+	}
+}
+
+func TestValidate_CodexProviderDoesNotRequireAPIKey(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"tokens":{"access_token":"token","account_id":"acct"}}`), 0o600); err != nil {
+		t.Fatalf("write codex auth: %v", err)
+	}
+
+	cfg := Config{
+		LLMProvider:   "codex",
+		MemoriesURL:   "http://localhost:8900",
+		MaxConcurrent: 1,
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("codex provider should validate without API keys: %v", err)
+	}
+}
+
+func TestValidate_CodexProviderRequiresSessionAuth(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	cfg := Config{
+		LLMProvider:   "codex",
+		MemoriesURL:   "http://localhost:8900",
+		MaxConcurrent: 1,
+	}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "codex auth not found") {
+		t.Fatalf("expected missing codex auth validation error, got %v", err)
 	}
 }
 

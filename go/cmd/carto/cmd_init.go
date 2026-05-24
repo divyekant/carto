@@ -3,7 +3,8 @@ package main
 // cmd_init.go — interactive and non-interactive configuration wizard.
 //
 // `carto init` sets up the essential configuration values (LLM provider,
-// API key, Memories URL) via interactive prompts or flags for automation.
+// provider credential when needed, Memories URL) via interactive prompts or
+// flags for automation.
 // It persists the result via config.Save and emits an envelope summary.
 
 import (
@@ -30,8 +31,8 @@ requires all values via flags or environment variables.`,
 	}
 
 	cmd.Flags().Bool("non-interactive", false, "Skip prompts, use flags and env vars only")
-	cmd.Flags().String("llm-provider", "", "LLM provider (anthropic, openai, ollama)")
-	cmd.Flags().String("api-key", "", "LLM API key")
+	cmd.Flags().String("llm-provider", "", "LLM provider (anthropic, openai, ollama, codex)")
+	cmd.Flags().String("api-key", "", "Provider API key (not required for codex or ollama)")
 	cmd.Flags().String("memories-url", "", "Memories server URL")
 	cmd.Flags().String("memories-key", "", "Memories API key")
 	cmd.Flags().String("projects-dir", "", "Directory for indexed projects")
@@ -73,14 +74,16 @@ func runInit(cmd *cobra.Command, _ []string) error {
 // ── Non-interactive mode ────────────────────────────────────────────────────
 
 func runInitNonInteractive(cmd *cobra.Command, cfg config.Config, cfgPath, provider, apiKey, memURL, memKey, projDir string) error {
-	if apiKey == "" {
-		return newConfigError("--api-key is required in non-interactive mode")
-	}
-
 	if provider != "" {
 		cfg.LLMProvider = provider
 	}
-	cfg.LLMApiKey = apiKey
+	if apiKey == "" && cfg.RequiresProviderAPIKey() {
+		return newConfigError("--api-key is required in non-interactive mode")
+	}
+
+	if apiKey != "" {
+		cfg.LLMApiKey = apiKey
+	}
 	if memURL != "" {
 		cfg.MemoriesURL = memURL
 	}
@@ -126,21 +129,24 @@ func runInitInteractive(cmd *cobra.Command, cfg config.Config, cfgPath, flagProv
 	if flagProvider != "" {
 		providerDefault = flagProvider
 	}
-	provider := promptValue(cmd, "LLM provider (anthropic, openai, ollama)", providerDefault)
+	provider := promptValue(cmd, "LLM provider (anthropic, openai, ollama, codex)", providerDefault)
 
-	// API key
-	keyDefault := cfg.EffectiveAPIKey()
-	if flagAPIKey != "" {
-		keyDefault = flagAPIKey
-	}
-	displayDefault := ""
-	if keyDefault != "" {
-		displayDefault = config.MaskSecret(keyDefault)
-	}
-	apiKey := promptValue(cmd, "API key", displayDefault)
-	// If user just pressed Enter on a masked default, keep the original key.
-	if apiKey == displayDefault || apiKey == "" {
-		apiKey = keyDefault
+	// Provider API key, only for providers that need one.
+	apiKey := ""
+	if (config.Config{LLMProvider: provider}).RequiresProviderAPIKey() {
+		keyDefault := cfg.EffectiveAPIKey()
+		if flagAPIKey != "" {
+			keyDefault = flagAPIKey
+		}
+		displayDefault := ""
+		if keyDefault != "" {
+			displayDefault = config.MaskSecret(keyDefault)
+		}
+		apiKey = promptValue(cmd, "Provider API key", displayDefault)
+		// If user just pressed Enter on a masked default, keep the original key.
+		if apiKey == displayDefault || apiKey == "" {
+			apiKey = keyDefault
+		}
 	}
 
 	// Memories URL
@@ -233,7 +239,11 @@ func printInitSummary(cmd *cobra.Command, cfg config.Config, cfgPath string) {
 	w := cmd.ErrOrStderr()
 	fmt.Fprintf(w, "%s%sConfiguration written%s to %s\n\n", bold, gold, reset, cfgPath)
 	fmt.Fprintf(w, "  %-20s %s\n", "LLM provider:", cfg.LLMProvider)
-	fmt.Fprintf(w, "  %-20s %s\n", "API key:", config.MaskSecret(cfg.LLMApiKey))
+	if cfg.RequiresProviderAPIKey() {
+		fmt.Fprintf(w, "  %-20s %s\n", "Provider API key:", config.MaskSecret(cfg.LLMApiKey))
+	} else if cfg.LLMProvider == "codex" {
+		fmt.Fprintf(w, "  %-20s %s\n", "Model auth:", "Codex session (~/.codex/auth.json)")
+	}
 	fmt.Fprintf(w, "  %-20s %s\n", "Memories URL:", cfg.MemoriesURL)
 	if cfg.MemoriesKey != "" {
 		fmt.Fprintf(w, "  %-20s %s\n", "Memories key:", config.MaskSecret(cfg.MemoriesKey))

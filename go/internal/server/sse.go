@@ -18,12 +18,12 @@ type ProgressEvent struct {
 
 // IndexResult is the final summary sent when an index run completes.
 type IndexResult struct {
-	Modules int           `json:"modules"`
-	Files   int           `json:"files"`
-	Atoms   int           `json:"atoms"`
-	Errors  int           `json:"errors"`
-	Elapsed time.Duration `json:"elapsed"`
-	ErrMsgs []string      `json:"error_messages,omitempty"`
+	Modules int      `json:"modules"`
+	Files   int      `json:"files"`
+	Atoms   int      `json:"atoms"`
+	Errors  int      `json:"errors"`
+	Elapsed string   `json:"elapsed"`
+	ErrMsgs []string `json:"error_messages,omitempty"`
 }
 
 // IndexRun tracks a single in-flight indexing run for a project.
@@ -156,6 +156,9 @@ func (r *IndexRun) WriteSSE(w http.ResponseWriter, req *http.Request) {
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
 			flusher.Flush()
+			if isTerminalSSEEvent(ev.Event) {
+				return
+			}
 		case <-r.done:
 			// Drain remaining events then send last event.
 			for {
@@ -179,6 +182,10 @@ func (r *IndexRun) WriteSSE(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+}
+
+func isTerminalSSEEvent(event string) bool {
+	return event == "complete" || event == "pipeline_error" || event == "stopped"
 }
 
 // RunManager tracks active indexing runs by project name.

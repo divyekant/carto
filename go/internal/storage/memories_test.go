@@ -194,6 +194,34 @@ func TestMemoriesClient_DeleteBySource(t *testing.T) {
 	}
 }
 
+func TestMemoriesClient_DeleteBySourceRetriesRetryableStatus(t *testing.T) {
+	attempts := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"detail":"try again"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"count": 7})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	count, err := client.DeleteBySource("proj/old")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 7 {
+		t.Fatalf("count = %d, want 7", count)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
 func TestMemoriesClient_Count(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/memories/count" {
@@ -344,6 +372,46 @@ func TestMemoriesClient_UpsertBatch(t *testing.T) {
 	}
 	if results[1].Status != "updated" {
 		t.Errorf("expected second status=updated, got %s", results[1].Status)
+	}
+}
+
+func TestMemoriesClient_UpsertBatchRetriesRetryableStatus(t *testing.T) {
+	attempts := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/memory/upsert-batch" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`temporarily overloaded`))
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": 200, "status": "updated"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewMemoriesClient(srv.URL, "test-key")
+	results, err := client.UpsertBatch([]Memory{{Text: "retry me", Source: "test/retry"}})
+	if err != nil {
+		t.Fatalf("unexpected error after retry: %v", err)
+	}
+
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if len(results) != 1 || results[0].ID != 200 {
+		t.Fatalf("unexpected results after retry: %+v", results)
 	}
 }
 

@@ -320,7 +320,7 @@ func (c *Client) Complete(prompt string, tier Tier, opts *CompleteOptions) (stri
 	return "", lastErr
 }
 
-// CompleteJSON calls Complete and extracts the first JSON object from the
+// CompleteJSON calls Complete and extracts the first JSON value from the
 // response, stripping any surrounding markdown fences.
 func (c *Client) CompleteJSON(prompt string, tier Tier, opts *CompleteOptions) (json.RawMessage, error) {
 	text, err := c.Complete(prompt, tier, opts)
@@ -328,15 +328,31 @@ func (c *Client) CompleteJSON(prompt string, tier Tier, opts *CompleteOptions) (
 		return nil, err
 	}
 
+	return extractJSONObject(text)
+}
+
+func extractJSONObject(text string) (json.RawMessage, error) {
 	cleaned := stripMarkdownFences(text)
 
-	// Find the first JSON object in the cleaned text.
-	start := strings.Index(cleaned, "{")
+	// Find the first JSON object or array in the cleaned text.
+	objectStart := strings.Index(cleaned, "{")
+	arrayStart := strings.Index(cleaned, "[")
+	start := -1
+	if objectStart >= 0 && (arrayStart == -1 || objectStart < arrayStart) {
+		start = objectStart
+	} else if arrayStart >= 0 {
+		start = arrayStart
+	}
 	if start == -1 {
-		return nil, fmt.Errorf("llm: no JSON object found in response")
+		return nil, fmt.Errorf("llm: no JSON object or array found in response")
+	}
+	open := cleaned[start]
+	close := byte('}')
+	if open == '[' {
+		close = ']'
 	}
 
-	// Walk forward to find the matching closing brace.
+	// Walk forward to find the matching closing delimiter.
 	depth := 0
 	inString := false
 	escaped := false
@@ -357,9 +373,9 @@ func (c *Client) CompleteJSON(prompt string, tier Tier, opts *CompleteOptions) (
 		if inString {
 			continue
 		}
-		if ch == '{' {
+		if ch == open {
 			depth++
-		} else if ch == '}' {
+		} else if ch == close {
 			depth--
 			if depth == 0 {
 				raw := json.RawMessage(cleaned[start : i+1])
@@ -372,7 +388,7 @@ func (c *Client) CompleteJSON(prompt string, tier Tier, opts *CompleteOptions) (
 		}
 	}
 
-	return nil, fmt.Errorf("llm: incomplete JSON object in response")
+	return nil, fmt.Errorf("llm: incomplete JSON value in response")
 }
 
 // stripMarkdownFences removes ```json ... ``` or ``` ... ``` wrappers.

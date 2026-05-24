@@ -34,8 +34,10 @@ carto index .
 ### Prerequisites
 
 - Go 1.25 or later (with CGO support for Tree-sitter)
-- An LLM API key ([Anthropic](https://console.anthropic.com/), OpenAI-compatible, or Ollama)
+- A local Codex ChatGPT session (`codex login`) for the default `codex` provider
 - A running [Memories](https://github.com/divyekant/memories) server (default: `http://localhost:8900`)
+
+Carto still uses LLM intelligence for atom extraction, deep analysis, and query support. By default it reads the Codex session at `~/.codex/auth.json` instead of requiring a separate Anthropic, OpenAI, Ollama, or other provider API key.
 
 ### As a Claude Code plugin
 
@@ -61,7 +63,7 @@ go build -o carto ./cmd/carto
 ### Configure
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-api03-..."
+export LLM_PROVIDER=codex
 # Memories server defaults to http://localhost:8900 -- override if needed:
 # export MEMORIES_URL="http://your-memories-server:8900"
 ```
@@ -145,14 +147,31 @@ carto index . --incremental            # Only process changed files
 carto index . --module my-service      # Index a single module
 carto index . --project my-project     # Override the project name
 carto index . --full                   # Force full re-index (ignore manifest)
+carto index /path/to/Ultron --dry-run  # Plan scale/cost without LLM calls or Memories writes
+carto index /path/to/Ultron --module core/dao --repair-missing-atoms --atoms-only --max-files 250
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--incremental` | Only re-index files that changed since the last run |
-| `--module <name>` | Restrict indexing to a single detected module |
+| `--module <name>` | Restrict indexing to a single detected module; refreshes module layers without replacing project-wide blueprint/pattern layers |
 | `--project <name>` | Set the project name (defaults to directory name) |
 | `--full` | Force a complete re-index, ignoring the manifest |
+| `--dry-run` | Scan and print an index plan without model calls or Memories writes |
+| `--repair-missing-atoms` | Process only files that do not already have atom memories |
+| `--atoms-only` | Stop after atom extraction/storage, useful for resumable large-repo repair passes |
+| `--max-files <n>` | Cap a repair pass to a fixed number of files; requires `--repair-missing-atoms` |
+
+Use `--dry-run` before indexing large repositories. It reports module/file scale,
+largest modules, and whether the run is likely too large for a foreground
+validation loop. For Ultron-scale repositories, prefer targeted `--module`
+probes, incremental re-indexing, or bounded repair batches such as
+`--repair-missing-atoms --atoms-only --max-files 250` against a Memories
+eval/test instance.
+
+If atom storage fails for a module, Carto reports the warning and leaves that
+module's files out of the manifest so a later retry cannot mistake partial
+storage for a complete index.
 
 ### `carto query <text>`
 
@@ -221,24 +240,26 @@ Carto is configured entirely through environment variables. See [`.env.example`]
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | -- | Anthropic API key or OAuth token |
 | `MEMORIES_URL` | No | `http://localhost:8900` | [Memories](https://github.com/divyekant/memories) server URL |
 | `MEMORIES_API_KEY` | No | -- | Memories server API key |
-| `CARTO_FAST_MODEL` | No | `claude-haiku-4-5-20251001` | Fast-tier model for atom analysis (Phase 2) |
-| `CARTO_DEEP_MODEL` | No | `claude-opus-4-6` | Deep-tier model for deep analysis (Phase 4) |
+| `CARTO_FAST_MODEL` | No | `gpt-5.4-mini` for `codex` | Fast-tier model for atom analysis (Phase 2) |
+| `CARTO_DEEP_MODEL` | No | `gpt-5.5` for `codex` | Deep-tier model for deep analysis (Phase 4) |
 | `CARTO_MAX_CONCURRENT` | No | `10` | Maximum concurrent LLM requests |
-| `LLM_PROVIDER` | No | `anthropic` | LLM provider: `anthropic`, `openai`, `ollama` |
-| `LLM_API_KEY` | No | -- | API key for non-Anthropic providers |
+| `LLM_PROVIDER` | No | `codex` | LLM provider: `codex`, `anthropic`, `openai`, `ollama` |
+| `LLM_API_KEY` | No | -- | API key for providers that require one |
+| `ANTHROPIC_API_KEY` | No | -- | Anthropic API key or OAuth token when `LLM_PROVIDER=anthropic` |
 | `LLM_BASE_URL` | No | -- | Base URL for non-Anthropic providers |
 
 ### Authentication
 
-Carto supports two authentication methods for the Anthropic API:
+The default `codex` provider uses the local Codex ChatGPT session stored at `~/.codex/auth.json`. Run `codex login`, then `carto auth validate` to verify that Carto can see the session. This path does not require model-provider API keys.
+
+Carto also supports provider API keys when explicitly configured:
 
 - **Standard API keys** (`sk-ant-api03-...`) -- used with the `X-Api-Key` header
 - **OAuth tokens** (`sk-ant-oat01-...`) -- used with `Authorization: Bearer` header, with automatic token refresh
 
-The authentication method is detected automatically from the key prefix.
+The Anthropic authentication method is detected automatically from the key prefix.
 
 ---
 
@@ -253,7 +274,7 @@ go/
     chunker/              Tree-sitter AST chunking engine
     config/               Environment-based configuration loading
     history/              Git history extraction (commits, churn)
-    llm/                  Multi-provider LLM client (Anthropic, OpenAI, Ollama)
+    llm/                  Multi-provider LLM client (Codex session, Anthropic, OpenAI, Ollama)
     manifest/             Incremental indexing manifest (hash-based change detection)
     patterns/             Skill file generation (CLAUDE.md, .cursorrules)
     pipeline/             5-phase orchestrator wiring all components together
@@ -271,6 +292,7 @@ For the full architecture deep-dive, see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - **Two-tier LLM strategy** -- The fast tier handles high-volume atom summaries (cheap), while the deep tier handles low-volume architectural analysis (thorough).
 - **Layered storage with source tags** -- each layer is stored with a structured source tag (`carto/{project}/{module}/layer:{layer}`) enabling precise retrieval and cleanup.
 - **Manifest-based incremental indexing** -- SHA-256 hashes track file changes so subsequent runs only process what changed.
+- **Dry-run planning for scale** -- `carto index --dry-run` gives a fast scan-only plan so Ultron-scale runs are sized before any LLM calls or Memories writes happen.
 - **Semaphore-based concurrency** -- a configurable concurrency limit prevents overwhelming the LLM API with parallel requests.
 
 ---
@@ -337,7 +359,8 @@ Or run directly:
 ```bash
 docker build -t carto go/
 docker run -p 8950:8950 \
-  -e ANTHROPIC_API_KEY="sk-ant-api03-..." \
+  -e LLM_PROVIDER="codex" \
+  -v ~/.codex:/root/.codex:ro \
   -e MEMORIES_URL="http://host.docker.internal:8900" \
   -v /path/to/projects:/projects \
   carto

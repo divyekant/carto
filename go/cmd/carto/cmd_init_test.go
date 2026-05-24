@@ -114,6 +114,39 @@ func TestInitCmd_NonInteractive_MissingAPIKey_Errors(t *testing.T) {
 	}
 }
 
+func TestInitCmd_NonInteractive_CodexDoesNotRequireAPIKey(t *testing.T) {
+	withCleanEnv(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+
+	origPath := config.ConfigPath
+	config.ConfigPath = cfgPath
+	t.Cleanup(func() { config.ConfigPath = origPath })
+
+	root := newRootWithInit()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{
+		"init",
+		"--non-interactive",
+		"--llm-provider", "codex",
+	})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("codex init should not require --api-key: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("config file not written: %v", err)
+	}
+	if !strings.Contains(string(data), "codex") {
+		t.Fatalf("config should contain codex provider: %s", data)
+	}
+}
+
 // =========================================================================
 // Non-interactive: JSON envelope output
 // =========================================================================
@@ -241,9 +274,9 @@ func TestInitCmd_NonInteractive_PartialFlags_UsesDefaults(t *testing.T) {
 	}
 
 	content := string(data)
-	// Default provider is "anthropic".
-	if !strings.Contains(content, "anthropic") {
-		t.Error("config should contain default provider 'anthropic'")
+	// Default provider is Codex session auth.
+	if !strings.Contains(content, "codex") {
+		t.Error("config should contain default provider 'codex'")
 	}
 	// Default memories URL.
 	if !strings.Contains(content, "http://localhost:8900") {

@@ -239,6 +239,29 @@ func TestAnalyzeModule_UsesDeep(t *testing.T) {
 	}
 }
 
+func TestAnalyzeModule_RetriesTransientDeepFailure(t *testing.T) {
+	mock := &errorLLM{
+		errorOn:   map[int]bool{0: true},
+		validResp: validModuleResponse,
+	}
+	da := NewDeepAnalyzer(mock)
+
+	result, err := da.AnalyzeModule(sampleModuleInput("auth"))
+	if err != nil {
+		t.Fatalf("AnalyzeModule returned error after retry: %v", err)
+	}
+	if result.ModuleName != "auth" {
+		t.Fatalf("module name = %q, want auth", result.ModuleName)
+	}
+
+	mock.mu.Lock()
+	calls := mock.calls
+	mock.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2", calls)
+	}
+}
+
 func TestSynthesizeSystem(t *testing.T) {
 	mock := &mockLLM{
 		responses: map[string]string{
@@ -424,10 +447,24 @@ func TestBuildModulePrompt_TruncatesLargeInput(t *testing.T) {
 	}
 }
 
+func TestBuildModulePrompt_ConstrainsResponseSize(t *testing.T) {
+	prompt := buildModulePrompt(sampleModuleInput("auth"))
+
+	for _, want := range []string{
+		"at most 20 wiring edges",
+		"at most 12 zones",
+		"valid compact JSON",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing response-size guidance %q", want)
+		}
+	}
+}
+
 func TestAnalyzeModules_SkipsErrors(t *testing.T) {
-	// Error on the second call (index 1).
+	// Error on every retry for the second module.
 	mock := &errorLLM{
-		errorOn:   map[int]bool{1: true},
+		errorOn:   map[int]bool{1: true, 2: true, 3: true},
 		validResp: validModuleResponse,
 	}
 	da := NewDeepAnalyzer(mock)

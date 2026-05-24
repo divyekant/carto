@@ -40,7 +40,12 @@ function ThemeToggle() {
   )
 }
 
-function SidebarContent({ health, onNavClick }: { health: { memories_healthy: boolean } | null; onNavClick?: () => void }) {
+interface HealthStatus {
+  memories_healthy: boolean
+  version?: string
+}
+
+function SidebarContent({ health, onNavClick }: { health: HealthStatus | null; onNavClick?: () => void }) {
   return (
     <>
       {/* Logo */}
@@ -118,7 +123,7 @@ function SidebarContent({ health, onNavClick }: { health: { memories_healthy: bo
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-        <span className="text-xs text-muted-foreground">v1.1.0</span>
+        <span className="text-xs text-muted-foreground">v{health?.version ?? '...'}</span>
         <ThemeToggle />
       </div>
     </>
@@ -127,7 +132,7 @@ function SidebarContent({ health, onNavClick }: { health: { memories_healthy: bo
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [health, setHealth] = useState<{ memories_healthy: boolean } | null>(null)
+  const [health, setHealth] = useState<HealthStatus | null>(null)
 
   useEffect(() => {
     fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => {})

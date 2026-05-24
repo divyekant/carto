@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,55 @@ type Module struct {
 	Type     string   // "go", "node", "java-maven", "java-gradle", "python", "rust", etc.
 	Manifest string   // path to manifest file (go.mod, package.json, etc.)
 	Files    []string // relative paths of files belonging to this module
+}
+
+// ResolveModuleFilter resolves a user-supplied module filter against detected
+// modules. Filters may be either an exact module path relative to the scan root
+// or an exact module name. Bare names must be unambiguous.
+func ResolveModuleFilter(modules []Module, filter string) ([]Module, error) {
+	filter = strings.Trim(strings.TrimSpace(filepath.ToSlash(filter)), "/")
+	if filter == "" {
+		return modules, nil
+	}
+
+	var pathMatches []Module
+	for _, m := range modules {
+		relPath := strings.Trim(filepath.ToSlash(m.RelPath), "/")
+		absPath := strings.Trim(filepath.ToSlash(m.Path), "/")
+		if relPath == filter || absPath == filter {
+			pathMatches = append(pathMatches, m)
+		}
+	}
+	if len(pathMatches) > 0 {
+		return pathMatches, nil
+	}
+
+	var nameMatches []Module
+	for _, m := range modules {
+		if m.Name == filter {
+			nameMatches = append(nameMatches, m)
+		}
+	}
+	switch len(nameMatches) {
+	case 0:
+		return nil, fmt.Errorf("module %q not found. available: %v", filter, moduleChoices(modules))
+	case 1:
+		return nameMatches, nil
+	default:
+		return nil, fmt.Errorf("module %q is ambiguous. use one of: %v", filter, moduleChoices(nameMatches))
+	}
+}
+
+func moduleChoices(modules []Module) []string {
+	choices := make([]string, len(modules))
+	for i, m := range modules {
+		if m.RelPath == "" {
+			choices[i] = m.Name
+			continue
+		}
+		choices[i] = fmt.Sprintf("%s (%s)", m.Name, filepath.ToSlash(m.RelPath))
+	}
+	return choices
 }
 
 // manifestDetectors maps manifest filenames to functions that return
@@ -109,6 +159,7 @@ func DetectModules(rootPath string, files []FileInfo) []Module {
 
 	// Assign files to their nearest ancestor module
 	moduleFiles := make([][]string, len(modules))
+	var unassigned []FileInfo
 	for _, f := range files {
 		assigned := false
 		for i, m := range modules {
@@ -128,8 +179,44 @@ func DetectModules(rootPath string, files []FileInfo) []Module {
 				}
 			}
 		}
-		// If still unassigned (shouldn't happen often), skip
-		_ = assigned
+		if !assigned {
+			unassigned = append(unassigned, f)
+		}
+	}
+
+	if len(unassigned) > 0 {
+		type syntheticGroup struct {
+			name    string
+			relPath string
+			files   []string
+		}
+		groupByRel := map[string]*syntheticGroup{}
+		var groupOrder []string
+		for _, f := range unassigned {
+			rel := ""
+			name := filepath.Base(rootPath)
+			parts := strings.Split(f.RelPath, string(filepath.Separator))
+			if len(parts) > 1 {
+				rel = parts[0]
+				name = parts[0]
+			}
+			group, ok := groupByRel[rel]
+			if !ok {
+				group = &syntheticGroup{name: name, relPath: rel}
+				groupByRel[rel] = group
+				groupOrder = append(groupOrder, rel)
+			}
+			group.files = append(group.files, f.RelPath)
+		}
+		for _, rel := range groupOrder {
+			group := groupByRel[rel]
+			modules = append(modules, moduleInfo{
+				name:    group.name,
+				relPath: group.relPath,
+				modType: "unknown",
+			})
+			moduleFiles = append(moduleFiles, group.files)
+		}
 	}
 
 	result := make([]Module, len(modules))

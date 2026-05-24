@@ -74,7 +74,33 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 
 	// ── 1. LLM API key ────────────────────────────────────────────────────
 	apiKey := cfg.EffectiveAPIKey()
-	if apiKey == "" && cfg.LLMProvider != "ollama" {
+	if cfg.LLMProvider == "codex" {
+		path, pathErr := config.CodexAuthFilePath()
+		if pathErr != nil {
+			checks = append(checks, doctorCheck{
+				Name:    "Codex Session",
+				raw:     checkFail,
+				Status:  "fail",
+				Message: pathErr.Error(),
+				Hint:    "Run: codex login",
+			})
+		} else if _, err := os.Stat(path); err != nil {
+			checks = append(checks, doctorCheck{
+				Name:    "Codex Session",
+				raw:     checkFail,
+				Status:  "fail",
+				Message: "Codex ChatGPT auth not found at " + path,
+				Hint:    "Run: codex login",
+			})
+		} else {
+			checks = append(checks, doctorCheck{
+				Name:    "Codex Session",
+				raw:     checkOK,
+				Status:  "ok",
+				Message: "ChatGPT-backed Codex auth found at " + path,
+			})
+		}
+	} else if apiKey == "" && cfg.RequiresProviderAPIKey() {
 		checks = append(checks, doctorCheck{
 			Name:    "LLM API Key",
 			raw:     checkFail,
@@ -97,7 +123,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 
 	// ── 2. LLM provider ───────────────────────────────────────────────────
 	switch cfg.LLMProvider {
-	case "anthropic", "openai", "ollama", "":
+	case "anthropic", "openai", "ollama", "codex", "":
 		checks = append(checks, doctorCheck{
 			Name:    "LLM Provider",
 			raw:     checkOK,
@@ -110,7 +136,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 			raw:     checkWarn,
 			Status:  "warn",
 			Message: "unrecognised provider: " + cfg.LLMProvider,
-			Hint:    "Set LLM_PROVIDER to anthropic, openai, or ollama",
+			Hint:    "Set LLM_PROVIDER to anthropic, openai, ollama, or codex",
 		})
 	}
 
@@ -259,7 +285,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		}
 
 		// ── 9. Network: LLM provider (quick HEAD probe) ────────────────────
-		if apiKey != "" {
+		if apiKey != "" || cfg.LLMProvider == "codex" || cfg.LLMProvider == "ollama" {
 			llmOK, llmErr := probeLLMEndpoint(cfg, timeout)
 			if llmErr != nil {
 				checks = append(checks, doctorCheck{
@@ -389,6 +415,15 @@ func probeLLMEndpoint(cfg config.Config, timeout time.Duration) (bool, error) {
 			base = "http://localhost:11434"
 		}
 		url = strings.TrimRight(base, "/") + "/api/tags"
+	case "codex":
+		path, err := config.CodexAuthFilePath()
+		if err != nil {
+			return false, err
+		}
+		if _, err := os.Stat(path); err != nil {
+			return false, err
+		}
+		return true, nil
 	default:
 		return false, fmt.Errorf("unknown provider %q", cfg.LLMProvider)
 	}

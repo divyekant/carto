@@ -350,7 +350,7 @@ func TestGetConfig(t *testing.T) {
 		MemoriesURL:   "http://localhost:8900",
 		MemoriesKey:   "test-memories-key",
 		AnthropicKey:  "sk-ant-api03-very-long-secret-key-value",
-		FastModel:    "claude-haiku-4-5-20251001",
+		FastModel:     "claude-haiku-4-5-20251001",
 		DeepModel:     "claude-opus-4-6",
 		MaxConcurrent: 10,
 		LLMProvider:   "anthropic",
@@ -403,7 +403,7 @@ func TestGetConfig(t *testing.T) {
 func TestPatchConfig(t *testing.T) {
 	cfg := config.Config{
 		MemoriesURL:   "http://localhost:8900",
-		FastModel:    "claude-haiku-4-5-20251001",
+		FastModel:     "claude-haiku-4-5-20251001",
 		MaxConcurrent: 10,
 	}
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
@@ -498,6 +498,100 @@ func TestStartIndex_MissingPath(t *testing.T) {
 	}
 }
 
+func TestIndexRequestDecodesResumableRepairMode(t *testing.T) {
+	var req indexRequest
+	body := strings.NewReader(`{
+		"path": "/repo",
+		"project": "large-repo",
+		"module": "core/dao",
+		"incremental": true,
+		"repair_missing_atoms": true,
+		"atoms_only": true,
+		"max_files": 25
+	}`)
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		t.Fatalf("decode indexRequest: %v", err)
+	}
+	if !req.RepairMissingAtoms {
+		t.Fatal("RepairMissingAtoms = false, want true")
+	}
+	if !req.AtomsOnly {
+		t.Fatal("AtomsOnly = false, want true")
+	}
+	if req.Module != "core/dao" {
+		t.Fatalf("Module = %q, want core/dao", req.Module)
+	}
+	if req.MaxFiles != 25 {
+		t.Fatalf("MaxFiles = %d, want 25", req.MaxFiles)
+	}
+}
+
+func TestStartIndex_MaxFilesRequiresRepairMissingAtoms(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"path": "/tmp/myproject", "project": "myproject", "max_files": 10}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["error"] != "max_files requires repair_missing_atoms" {
+		t.Fatalf("error = %v, want max_files requires repair_missing_atoms", resp["error"])
+	}
+}
+
+func TestIndexPlanScansWithoutStartingRun(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/plan\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	body := strings.NewReader(`{"path": "` + dir + `", "project": "plan-project"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/index-plan", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["project"] != "plan-project" {
+		t.Fatalf("project = %v, want plan-project", resp["project"])
+	}
+	if resp["modules"].(float64) != 1 {
+		t.Fatalf("modules = %v, want 1", resp["modules"])
+	}
+	if resp["files"].(float64) != 2 {
+		t.Fatalf("files = %v, want 2", resp["files"])
+	}
+	if run := srv.runs.Get("plan-project"); run != nil {
+		t.Fatal("index-plan should not start an index run")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".carto")); !os.IsNotExist(err) {
+		t.Fatalf("index-plan should not create .carto, stat err=%v", err)
+	}
+}
+
 func TestSSE_NoActiveRun(t *testing.T) {
 	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
 	srv := New(config.Config{}, memoriesClient, "", nil)
@@ -514,6 +608,61 @@ func TestSSE_NoActiveRun(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] == nil || !strings.Contains(resp["error"].(string), "no active index run") {
 		t.Errorf("expected 'no active index run' error, got %v", resp["error"])
+	}
+}
+
+func TestSSE_ActiveRunStreamsThroughMiddleware(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	run := srv.runs.Start("active")
+	if run == nil {
+		t.Fatal("expected active run")
+	}
+	run.SendResult(IndexResult{Modules: 1, Files: 2, Atoms: 3})
+	srv.runs.Finish("active")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/active/progress", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "event: complete") {
+		t.Fatalf("expected complete SSE event, got %q", w.Body.String())
+	}
+}
+
+func TestSSE_LiveRunSendsTerminalEventOnce(t *testing.T) {
+	memoriesClient := storage.NewMemoriesClient("http://127.0.0.1:1", "test-key")
+	srv := New(config.Config{}, memoriesClient, "", nil)
+
+	run := srv.runs.Start("active")
+	if run == nil {
+		t.Fatal("expected active run")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/active/progress", nil)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		srv.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	run.SendResult(IndexResult{Modules: 1, Files: 2, Atoms: 3})
+	srv.runs.Finish("active")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler did not return after terminal event")
+	}
+
+	if got := strings.Count(w.Body.String(), "event: complete"); got != 1 {
+		t.Fatalf("complete event count = %d, want 1; body=%q", got, w.Body.String())
 	}
 }
 

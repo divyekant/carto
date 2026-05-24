@@ -57,10 +57,10 @@ func (c Config) Validate() error {
 
 	// LLM provider must be one of the known values.
 	switch c.LLMProvider {
-	case "anthropic", "openai", "ollama", "":
+	case "anthropic", "openai", "ollama", "codex", "":
 		// acceptable
 	default:
-		errs = append(errs, fmt.Sprintf("unknown llm_provider %q (expected anthropic|openai|ollama)", c.LLMProvider))
+		errs = append(errs, fmt.Sprintf("unknown llm_provider %q (expected anthropic|openai|ollama|codex)", c.LLMProvider))
 	}
 
 	// API key required for cloud providers.
@@ -74,6 +74,13 @@ func (c Config) Validate() error {
 		}
 		if c.LLMBaseURL == "" {
 			errs = append(errs, "LLM_BASE_URL is required for openai provider")
+		}
+	} else if c.LLMProvider == "codex" {
+		path, err := CodexAuthFilePath()
+		if err != nil {
+			errs = append(errs, err.Error())
+		} else if _, statErr := os.Stat(path); statErr != nil {
+			errs = append(errs, fmt.Sprintf("codex auth not found at %s — run `codex login`", path))
 		}
 	}
 
@@ -138,16 +145,17 @@ type persistedConfig struct {
 var ConfigPath string
 
 func Load() Config {
+	llmProvider := envOr("LLM_PROVIDER", "codex")
 	cfg := Config{
 		MemoriesURL:   envOr("MEMORIES_URL", "http://localhost:8900"),
 		MemoriesKey:   os.Getenv("MEMORIES_API_KEY"),
 		AnthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		FastModel:     envOr("CARTO_FAST_MODEL", "claude-haiku-4-5-20251001"),
-		DeepModel:     envOr("CARTO_DEEP_MODEL", "claude-opus-4-6"),
+		FastModel:     envOr("CARTO_FAST_MODEL", defaultFastModel(llmProvider)),
+		DeepModel:     envOr("CARTO_DEEP_MODEL", defaultDeepModel(llmProvider)),
 		MaxConcurrent: envOrInt("CARTO_MAX_CONCURRENT", 10),
 		FastMaxTokens: envOrInt("CARTO_FAST_MAX_TOKENS", 4096),
 		DeepMaxTokens: envOrInt("CARTO_DEEP_MAX_TOKENS", 8192),
-		LLMProvider:   envOr("LLM_PROVIDER", "anthropic"),
+		LLMProvider:   llmProvider,
 		LLMApiKey:     os.Getenv("LLM_API_KEY"),
 		LLMBaseURL:    os.Getenv("LLM_BASE_URL"),
 		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
@@ -333,8 +341,39 @@ func (c Config) EffectiveAPIKey() string {
 	return c.AnthropicKey
 }
 
+func (c Config) RequiresProviderAPIKey() bool {
+	return c.LLMProvider == "anthropic" || c.LLMProvider == "openai" || c.LLMProvider == ""
+}
+
+// CodexAuthFilePath returns the ChatGPT-backed Codex auth file used for the
+// codex LLM provider. CODEX_HOME follows Codex CLI's own override.
+func CodexAuthFilePath() (string, error) {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "auth.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("codex auth: resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex", "auth.json"), nil
+}
+
 func IsOAuthToken(key string) bool {
 	return len(key) > 0 && strings.HasPrefix(key, "sk-ant-oat01-")
+}
+
+func defaultFastModel(provider string) string {
+	if provider == "codex" {
+		return "gpt-5.4-mini"
+	}
+	return "claude-haiku-4-5-20251001"
+}
+
+func defaultDeepModel(provider string) string {
+	if provider == "codex" {
+		return "gpt-5.5"
+	}
+	return "claude-opus-4-6"
 }
 
 func envOr(key, fallback string) string {
